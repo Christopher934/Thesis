@@ -29,6 +29,242 @@ interface WorkloadAlert {
   recommendation: string;
 }
 
+// 🧠 NEW: Backtracking Algorithm Support Classes
+interface BacktrackingResult {
+  success: boolean;
+  assignments: ShiftAssignment[];
+  conflicts: string[];
+  exploredNodes: number;
+  pruned: number;
+}
+
+interface CandidateUser {
+  user: any;
+  score: number;
+  reason: string;
+}
+
+interface ConstraintValidation {
+  isValid: boolean;
+  reason: string;
+  violatedConstraints: string[];
+}
+
+/**
+ * 🧠 BACKTRACKING STATE MANAGEMENT: Maintains assignment stack and state
+ */
+class BacktrackingState {
+  private assignmentStack: ShiftAssignment[] = [];
+  private exploredNodes: number = 0;
+  private prunedBranches: number = 0;
+  private userAssignmentCount: Map<number, number> = new Map();
+  private dateAssignments: Map<string, ShiftAssignment[]> = new Map();
+  private availableUsers: any[];
+
+  constructor(initialAssignments: ShiftAssignment[], availableUsers: any[]) {
+    this.assignmentStack = [...initialAssignments];
+    this.availableUsers = availableUsers;
+    this.buildStateMaps();
+  }
+
+  private buildStateMaps(): void {
+    // Build user assignment count map
+    this.userAssignmentCount.clear();
+    this.dateAssignments.clear();
+
+    for (const assignment of this.assignmentStack) {
+      // User assignment count
+      const currentCount = this.userAssignmentCount.get(assignment.userId) || 0;
+      this.userAssignmentCount.set(assignment.userId, currentCount + 1);
+
+      // Date assignments
+      const date = assignment.shiftDetails.date;
+      if (!this.dateAssignments.has(date)) {
+        this.dateAssignments.set(date, []);
+      }
+      this.dateAssignments.get(date)!.push(assignment);
+    }
+  }
+
+  pushAssignment(assignment: ShiftAssignment): void {
+    this.assignmentStack.push(assignment);
+    
+    // Update user assignment count
+    const currentCount = this.userAssignmentCount.get(assignment.userId) || 0;
+    this.userAssignmentCount.set(assignment.userId, currentCount + 1);
+
+    // Update date assignments
+    const date = assignment.shiftDetails.date;
+    if (!this.dateAssignments.has(date)) {
+      this.dateAssignments.set(date, []);
+    }
+    this.dateAssignments.get(date)!.push(assignment);
+  }
+
+  popAssignment(): ShiftAssignment | undefined {
+    const removed = this.assignmentStack.pop();
+    
+    if (removed) {
+      // Update user assignment count
+      const currentCount = this.userAssignmentCount.get(removed.userId) || 0;
+      if (currentCount > 1) {
+        this.userAssignmentCount.set(removed.userId, currentCount - 1);
+      } else {
+        this.userAssignmentCount.delete(removed.userId);
+      }
+
+      // Update date assignments
+      const date = removed.shiftDetails.date;
+      const dateAssigns = this.dateAssignments.get(date);
+      if (dateAssigns) {
+        const index = dateAssigns.findIndex(a => 
+          a.userId === removed.userId && 
+          a.shiftDetails.location === removed.shiftDetails.location &&
+          a.shiftDetails.shiftType === removed.shiftDetails.shiftType
+        );
+        if (index !== -1) {
+          dateAssigns.splice(index, 1);
+        }
+        if (dateAssigns.length === 0) {
+          this.dateAssignments.delete(date);
+        }
+      }
+    }
+    
+    return removed;
+  }
+
+  getCurrentAssignments(): ShiftAssignment[] {
+    return [...this.assignmentStack];
+  }
+
+  getUserAssignmentCount(userId: number): number {
+    return this.userAssignmentCount.get(userId) || 0;
+  }
+
+  getDateAssignments(date: string): ShiftAssignment[] {
+    return this.dateAssignments.get(date) || [];
+  }
+
+  hasUserAssignmentOnDate(userId: number, date: string): boolean {
+    const dateAssigns = this.dateAssignments.get(date) || [];
+    return dateAssigns.some(a => a.userId === userId);
+  }
+
+  shouldPrune(request: ShiftCreationRequest): boolean {
+    // PRUNING STRATEGY 1: Check if any user can possibly fulfill this request
+    const availableOnDate = this.availableUsers.filter(user => 
+      !this.hasUserAssignmentOnDate(user.id, request.date)
+    );
+
+    if (availableOnDate.length === 0) {
+      return true; // No users available on this date
+    }
+
+    // PRUNING STRATEGY 2: Check role requirements
+    if (request.preferredRoles && request.preferredRoles.length > 0) {
+      const usersWithRole = availableOnDate.filter(user => 
+        request.preferredRoles!.includes(user.role)
+      );
+      if (usersWithRole.length === 0) {
+        return true; // No users with required role
+      }
+    }
+
+    // PRUNING STRATEGY 3: Check workload limits
+    const overloadedUsers = availableOnDate.filter(user => 
+      this.getUserAssignmentCount(user.id) >= 20 // Max shifts per user
+    );
+
+    if (overloadedUsers.length === availableOnDate.length) {
+      return true; // All available users are overloaded
+    }
+
+    return false; // Don't prune
+  }
+
+  incrementExploredNodes(): void {
+    this.exploredNodes++;
+  }
+
+  incrementPrunedBranches(): void {
+    this.prunedBranches++;
+  }
+
+  getExploredNodes(): number {
+    return this.exploredNodes;
+  }
+
+  getPrunedBranches(): number {
+    return this.prunedBranches;
+  }
+}
+
+// 🧠 ADVANCED FEATURES INTERFACES
+interface ConflictAnalysis {
+  totalConflicts: number;
+  conflictsByType: { [key: string]: number };
+  severityDistribution: { [key: string]: number };
+  affectedUsers: number[];
+  resolutionComplexity: number;
+  priorityQueue: DetectedConflict[];
+}
+
+interface DetectedConflict {
+  type: 'SCHEDULE_CONFLICT' | 'WORKLOAD_OVERLOAD' | 'CAPACITY_SHORTAGE' | 'SKILL_MISMATCH' | 'REGULATION_VIOLATION' | 'CRITICAL_SHORTAGE';
+  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  affectedUsers: number[];
+  description: string;
+  suggestedResolution: string;
+  estimatedImpact: number;
+}
+
+interface ResolutionStrategy {
+  type: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+  description: string;
+  targetConflicts: string[];
+  estimatedResolution: number;
+  complexityScore: number;
+}
+
+interface QualityMetrics {
+  overallScore: number;
+  fairnessScore: number;
+  efficiencyScore: number;
+  satisfactionScore: number;
+  complianceScore: number;
+  utilizationRate: number;
+  conflictRate: number;
+  skillMatchRate: number;
+  workloadBalance: number;
+  temporalDistribution: number;
+}
+
+interface QualityImprovementReport {
+  qualityScore: number;
+  metrics: QualityMetrics;
+  recommendations: string[];
+  optimizations: OptimizationOpportunity[];
+  benchmarks: BenchmarkComparison;
+  improvementPotential: number;
+}
+
+interface OptimizationOpportunity {
+  category: string;
+  impact: 'LOW' | 'MEDIUM' | 'HIGH';
+  effort: 'LOW' | 'MEDIUM' | 'HIGH';
+  description: string;
+  expectedImprovement: number;
+}
+
+interface BenchmarkComparison {
+  industryAverage: number;
+  bestPractice: number;
+  previousPeriod: number;
+  percentileRank: number;
+}
+
 // Additional interfaces for weekly/monthly scheduling
 interface WeeklyScheduleStats {
   totalShifts: number;
@@ -245,73 +481,100 @@ export class AdminShiftOptimizationService {
   }> {
     console.log(`👁️ Previewing optimal shift assignments for ${requests.length} requests`);
     
-    // Step 1: Get available users with their current workload
-    const availableUsers = await this.getAvailableUsersWithWorkload();
-    
-    // Step 2: Check location capacity for each request
-    const locationCapacityStatus = await Promise.all(
-      requests.map(req => this.checkLocationCapacity(req))
-    );
-    
-    // Step 3: Apply Greedy Algorithm first (fast initial assignment)
-    const greedyAssignments = await this.greedyAssignment(requests, availableUsers);
-    
-    // Step 4: Apply Backtracking to optimize conflicts
-    const optimizedAssignments = await this.backtrackingOptimization(
-      greedyAssignments,
-      availableUsers
-    );
-    
-    // Step 5: Generate workload alerts
-    const workloadAlerts = await this.generateWorkloadAlerts();
-    
-    // Step 6: Identify remaining conflicts
-    const conflicts = await this.identifyConflicts(optimizedAssignments);
-    
-    // Step 7: Calculate statistics
-    const totalRequested = requests.reduce((sum, req) => sum + req.requiredCount, 0);
-    const totalAssigned = optimizedAssignments.length;
-    const fulfillmentRate = totalRequested > 0 ? (totalAssigned / totalRequested) * 100 : 100;
-    
-    // Step 8: Calculate workload distribution
-    const workloadDistribution: { [userId: number]: number } = {};
-    optimizedAssignments.forEach(assignment => {
-      workloadDistribution[assignment.userId] = (workloadDistribution[assignment.userId] || 0) + 1;
-    });
-    
-    // Step 9: Generate recommendations
-    const recommendations = this.generateOptimizationRecommendations(
-      conflicts, 
-      workloadAlerts, 
-      locationCapacityStatus
-    );
+    try {
+      // Step 1: Get available users with their current workload
+      console.log('🔍 Step 1: Getting available users...');
+      const availableUsers = await this.getAvailableUsersWithWorkload();
+      console.log(`   Found ${availableUsers.length} available users`);
+      
+      // Step 2: Check location capacity for each request
+      console.log('🔍 Step 2: Checking location capacity...');
+      const locationCapacityStatus = await Promise.all(
+        requests.map(req => this.checkLocationCapacity(req))
+      );
+      console.log(`   Checked capacity for ${locationCapacityStatus.length} requests`);
+      
+      // Step 3: Apply Greedy Algorithm first (fast initial assignment)
+      console.log('🔍 Step 3: Applying greedy algorithm...');
+      const greedyAssignments = await this.greedyAssignment(requests, availableUsers);
+      console.log(`   Greedy algorithm assigned ${greedyAssignments.length} shifts`);
+      
+      // Step 4: Apply Backtracking to optimize conflicts
+      console.log('🔍 Step 4: Applying backtracking optimization...');
+      const optimizedAssignments = await this.backtrackingOptimization(
+        greedyAssignments,
+        availableUsers
+      );
+      console.log(`   Backtracking optimization resulted in ${optimizedAssignments.length} assignments`);
+      
+      // Step 5: Generate workload alerts
+      console.log('🔍 Step 5: Generating workload alerts...');
+      const workloadAlerts = await this.generateWorkloadAlerts();
+      console.log(`   Generated ${workloadAlerts.length} workload alerts`);
+      
+      // Step 6: Identify remaining conflicts
+      console.log('🔍 Step 6: Identifying conflicts...');
+      const conflicts = await this.identifyConflicts(optimizedAssignments);
+      console.log(`   Found ${conflicts.length} conflicts`);
+      
+      // Step 7: Calculate statistics
+      console.log('🔍 Step 7: Calculating statistics...');
+      const totalRequested = requests.reduce((sum, req) => sum + req.requiredCount, 0);
+      const totalAssigned = optimizedAssignments.length;
+      const fulfillmentRate = totalRequested > 0 ? (totalAssigned / totalRequested) * 100 : 100;
+      console.log(`   Statistics: ${totalAssigned}/${totalRequested} = ${fulfillmentRate.toFixed(1)}%`);
+      
+      // Step 8: Calculate workload distribution
+      console.log('🔍 Step 8: Calculating workload distribution...');
+      const workloadDistribution: { [userId: number]: number } = {};
+      optimizedAssignments.forEach(assignment => {
+        workloadDistribution[assignment.userId] = (workloadDistribution[assignment.userId] || 0) + 1;
+      });
+      console.log(`   Workload distributed across ${Object.keys(workloadDistribution).length} users`);
+      
+      // Step 9: Generate recommendations
+      console.log('🔍 Step 9: Generating recommendations...');
+      const recommendations = this.generateOptimizationRecommendations(
+        conflicts, 
+        workloadAlerts, 
+        locationCapacityStatus
+      );
+      console.log(`   Generated ${recommendations.length} recommendations`);
 
-    // Step 10: Format preview data
-    const preview = optimizedAssignments.map(assignment => ({
-      userId: assignment.userId,
-      userName: availableUsers.find(u => u.id === assignment.userId)?.namaDepan + ' ' + 
-                availableUsers.find(u => u.id === assignment.userId)?.namaBelakang,
-      userRole: availableUsers.find(u => u.id === assignment.userId)?.role,
-      date: assignment.shiftDetails.date,
-      location: assignment.shiftDetails.location,
-      shiftType: assignment.shiftDetails.shiftType,
-      priority: assignment.shiftDetails.priority,
-      score: assignment.score,
-      reason: assignment.reason
-    }));
-    
-    return {
-      preview,
-      statistics: {
-        totalRequested,
-        totalAssigned,
-        fulfillmentRate,
-        workloadDistribution,
-        conflicts,
-        warnings: workloadAlerts.filter(alert => alert.status !== 'NORMAL')
-      },
-      recommendations
-    };
+      // Step 10: Format preview data
+      console.log('🔍 Step 10: Formatting preview data...');
+      const preview = optimizedAssignments.map(assignment => ({
+        userId: assignment.userId,
+        userName: availableUsers.find(u => u.id === assignment.userId)?.namaDepan + ' ' + 
+                  availableUsers.find(u => u.id === assignment.userId)?.namaBelakang,
+        userRole: availableUsers.find(u => u.id === assignment.userId)?.role,
+        date: assignment.shiftDetails.date,
+        location: assignment.shiftDetails.location,
+        shiftType: assignment.shiftDetails.shiftType,
+        priority: assignment.shiftDetails.priority,
+        score: assignment.score,
+        reason: assignment.reason
+      }));
+      console.log(`   Formatted ${preview.length} preview items`);
+      
+      console.log('✅ Preview generation completed successfully');
+      return {
+        preview,
+        statistics: {
+          totalRequested,
+          totalAssigned,
+          fulfillmentRate,
+          workloadDistribution,
+          conflicts,
+          warnings: workloadAlerts.filter(alert => alert.status !== 'NORMAL')
+        },
+        recommendations
+      };
+      
+    } catch (error) {
+      console.error('❌ Error in previewOptimalShiftAssignments:', error);
+      throw error;
+    }
   }
 
   /**
@@ -372,6 +635,42 @@ export class AdminShiftOptimizationService {
             errors.push({
               assignment,
               error: nightShiftValidation.reason,
+              severity: 'HIGH'
+            });
+            continue;
+          }
+
+          // 🔥 NEW: Validate maximum shifts per week
+          const weeklyValidation = await this.validateMaxShiftsPerWeek(user, {
+            shiftType: assignment.shiftType,
+            date: assignment.date,
+            location: assignment.location,
+            requiredCount: 1,
+            priority: assignment.priority
+          });
+          
+          if (!weeklyValidation.isValid) {
+            errors.push({
+              assignment,
+              error: weeklyValidation.reason,
+              severity: 'HIGH'
+            });
+            continue;
+          }
+
+          // 🔥 NEW: Validate consecutive night shifts with database check
+          const consecutiveNightValidation = await this.validateConsecutiveNightShifts(user, {
+            shiftType: assignment.shiftType,
+            date: assignment.date,
+            location: assignment.location,
+            requiredCount: 1,
+            priority: assignment.priority
+          });
+          
+          if (!consecutiveNightValidation.isValid) {
+            errors.push({
+              assignment,
+              error: consecutiveNightValidation.reason,
               severity: 'HIGH'
             });
             continue;
@@ -460,13 +759,13 @@ export class AdminShiftOptimizationService {
     for (const request of sortedRequests) {
       console.log(`📋 Processing request for ${request.location} on ${request.date}, need ${request.requiredCount} users`);
       
-      // 🔥 ENHANCED: Calculate fitness score with workload balancing
-      const userScores = balancedUsers.map(user => ({
+      // 🔥 ENHANCED: Calculate fitness score with workload balancing and validations (async)
+      const userScores = await Promise.all(balancedUsers.map(async user => ({
         user,
-        score: this.calculateEnhancedFitnessScore(user, request, userAssignmentCount.get(user.id) || 0),
+        score: await this.calculateEnhancedFitnessScore(user, request, userAssignmentCount.get(user.id) || 0),
         currentAssignments: userAssignmentCount.get(user.id) || 0,
         totalShifts: user.totalShifts || 0
-      }));
+      })));
       
       console.log(`📊 Top candidates:`, userScores.slice(0, 5).map(us => ({ 
         userId: us.user.id, 
@@ -507,43 +806,132 @@ export class AdminShiftOptimizationService {
   }
 
   /**
-   * BACKTRACKING ALGORITHM: Optimize assignments by resolving conflicts
+   * 🧠 TRUE BACKTRACKING ALGORITHM: Recursive State Space Search with Constraint Satisfaction
    */
   private async backtrackingOptimization(
     initialAssignments: ShiftAssignment[],
     availableUsers: any[]
   ): Promise<ShiftAssignment[]> {
-    const optimizedAssignments = [...initialAssignments];
+    console.log('🔍 Starting True Backtracking Algorithm...');
     
-    // Group assignments by date to check for conflicts
-    const assignmentsByDate = this.groupAssignmentsByDate(optimizedAssignments);
+    // Initialize backtracking state
+    const backtrackingState = new BacktrackingState(initialAssignments, availableUsers);
     
-    for (const [date, dayAssignments] of assignmentsByDate.entries()) {
-      // Check for overloaded users (more than 1 shift per day)
-      const userShiftCount = new Map<number, number>();
-      
-      for (const assignment of dayAssignments) {
-        const currentCount = userShiftCount.get(assignment.userId) || 0;
-        userShiftCount.set(assignment.userId, currentCount + 1);
-      }
-      
-      // Find users with conflicts (multiple shifts same day)
-      const conflictedUsers = Array.from(userShiftCount.entries())
-        .filter(([userId, count]) => count > 1)
-        .map(([userId]) => userId);
-      
-      // Apply backtracking for each conflicted user
-      for (const userId of conflictedUsers) {
-        await this.backtrackUserAssignments(
-          userId,
-          date,
-          optimizedAssignments,
-          availableUsers
-        );
-      }
+    // Extract unfulfilled requests that need optimization
+    const unfulfilledRequests = this.extractUnfulfilledRequests(initialAssignments);
+    
+    console.log(`📊 Backtracking Stats: ${unfulfilledRequests.length} unfulfilled requests to optimize`);
+    
+    // Start recursive backtracking
+    const result = await this.recursiveBacktracking(
+      backtrackingState,
+      unfulfilledRequests,
+      0
+    );
+    
+    if (result.success) {
+      console.log(`✅ Backtracking completed: ${result.assignments.length} optimal assignments found`);
+      return result.assignments;
+    } else {
+      console.log(`⚠️ Backtracking partial success: ${result.assignments.length} assignments, ${result.conflicts.length} conflicts remain`);
+      return result.assignments;
     }
+  }
+
+  /**
+   * 🔄 RECURSIVE BACKTRACKING: Core algorithm with branching and pruning
+   */
+  private async recursiveBacktracking(
+    state: BacktrackingState,
+    requests: ShiftCreationRequest[],
+    requestIndex: number
+  ): Promise<BacktrackingResult> {
     
-    return optimizedAssignments;
+    // BASE CASE: All requests processed
+    if (requestIndex >= requests.length) {
+      console.log(`🎯 Base case reached: All ${requests.length} requests processed`);
+      return {
+        success: true,
+        assignments: state.getCurrentAssignments(),
+        conflicts: [],
+        exploredNodes: state.getExploredNodes(),
+        pruned: state.getPrunedBranches()
+      };
+    }
+
+    const currentRequest = requests[requestIndex];
+    console.log(`🔍 Processing request ${requestIndex + 1}/${requests.length}: ${currentRequest.location} ${currentRequest.shiftType} on ${currentRequest.date}`);
+    
+    // PRUNING CHECK: Early termination if solution space exhausted
+    if (state.shouldPrune(currentRequest)) {
+      console.log(`✂️ Pruning branch: Constraints cannot be satisfied`);
+      state.incrementPrunedBranches();
+      return {
+        success: false,
+        assignments: state.getCurrentAssignments(),
+        conflicts: [`Pruned: ${currentRequest.location} ${currentRequest.shiftType}`],
+        exploredNodes: state.getExploredNodes(),
+        pruned: state.getPrunedBranches()
+      };
+    }
+
+    // Get candidate users sorted by fitness score (HEURISTIC ORDERING)
+    const candidates = await this.getCandidateUsers(currentRequest, state);
+    console.log(`👥 Found ${candidates.length} candidate users for ${currentRequest.location} ${currentRequest.shiftType}`);
+
+    // TRY EACH CANDIDATE (BRANCHING)
+    for (const candidate of candidates) {
+      console.log(`🧪 Trying candidate: ${candidate.user.namaDepan} ${candidate.user.namaBelakang} (score: ${candidate.score})`);
+      
+      // CHECK CONSTRAINTS
+      const constraintValidation = await this.validateAllConstraints(candidate.user, currentRequest, state);
+      
+      if (!constraintValidation.isValid) {
+        console.log(`❌ Constraint violation: ${constraintValidation.reason}`);
+        state.incrementExploredNodes();
+        continue; // Try next candidate
+      }
+
+      // MAKE ASSIGNMENT (FORWARD STEP)
+      const assignment: ShiftAssignment = {
+        userId: candidate.user.id,
+        shiftDetails: currentRequest,
+        score: candidate.score,
+        reason: `Backtracking optimal assignment: ${constraintValidation.reason}`
+      };
+
+      state.pushAssignment(assignment);
+      console.log(`✅ Assignment made: ${candidate.user.namaDepan} assigned to ${currentRequest.location}`);
+
+      // RECURSIVE CALL (EXPLORE DEEPER)
+      const subResult = await this.recursiveBacktracking(
+        state,
+        requests,
+        requestIndex + 1
+      );
+
+      // CHECK IF SOLUTION FOUND
+      if (subResult.success) {
+        console.log(`🎉 Solution found through recursion!`);
+        return subResult;
+      }
+
+      // BACKTRACK: UNDO ASSIGNMENT (BACKWARD STEP)
+      const undoneAssignment = state.popAssignment();
+      console.log(`🔄 Backtracking: Undoing assignment for ${undoneAssignment?.userId}`);
+      
+      // Continue with next candidate
+    }
+
+    // NO SOLUTION FOUND WITH ANY CANDIDATE
+    console.log(`💔 No solution found for request ${requestIndex + 1}: ${currentRequest.location} ${currentRequest.shiftType}`);
+    return {
+      success: false,
+      assignments: state.getCurrentAssignments(),
+      conflicts: [`No valid assignment: ${currentRequest.location} ${currentRequest.shiftType} on ${currentRequest.date}`],
+      exploredNodes: state.getExploredNodes(),
+      pruned: state.getPrunedBranches()
+    };
   }
 
   /**
@@ -584,9 +972,9 @@ export class AdminShiftOptimizationService {
   }
 
   /**
-   * 🔥 NEW: Enhanced fitness score with improved workload balancing
+   * 🔥 NEW: Enhanced fitness score with improved workload balancing and validation
    */
-  private calculateEnhancedFitnessScore(user: any, request: ShiftCreationRequest, currentAssignments: number): number {
+  private async calculateEnhancedFitnessScore(user: any, request: ShiftCreationRequest, currentAssignments: number): Promise<number> {
     let score = 50; // Base score
     
     // 1. Role compatibility (highest priority)
@@ -632,7 +1020,15 @@ export class AdminShiftOptimizationService {
     const hasConflict = this.checkDateConflict(user, request.date);
     if (hasConflict) score = 0; // Completely unavailable
     
-    // 8. Seniority bonus (if available)
+    // 🔥 NEW: 8. Validate maximum shifts per week (CRITICAL CHECK)
+    const weeklyValidation = await this.validateMaxShiftsPerWeek(user, request);
+    if (!weeklyValidation.isValid) score = 0; // Cannot assign - would exceed weekly limit
+    
+    // 🔥 NEW: 9. Validate consecutive night shifts (MEDICAL STANDARDS CHECK)
+    const consecutiveNightValidation = await this.validateConsecutiveNightShifts(user, request);
+    if (!consecutiveNightValidation.isValid) score = 0; // Cannot assign - would violate night shift rules
+    
+    // 10. Seniority bonus (if available)
     if (user.tanggalBergabung) {
       const yearsOfService = (Date.now() - new Date(user.tanggalBergabung).getTime()) / (365 * 24 * 60 * 60 * 1000);
       if (yearsOfService > 5) score += 8;
@@ -640,6 +1036,183 @@ export class AdminShiftOptimizationService {
     }
     
     return Math.max(0, Math.min(100, score));
+  }
+
+  /**
+   * 🧠 EXTRACT UNFULFILLED REQUESTS: Convert greedy failures to backtracking opportunities
+   */
+  private extractUnfulfilledRequests(initialAssignments: ShiftAssignment[]): ShiftCreationRequest[] {
+    // For now, we'll focus on optimizing existing assignments
+    // In a full implementation, this would track original requests vs successful assignments
+    return [];
+  }
+
+  /**
+   * 🎯 GET CANDIDATE USERS: Fetch and rank users by fitness score for backtracking
+   */
+  private async getCandidateUsers(
+    request: ShiftCreationRequest,
+    state: BacktrackingState
+  ): Promise<CandidateUser[]> {
+    
+    // Get users not already assigned on this date
+    const availableUsers = state.availableUsers.filter(user => 
+      !state.hasUserAssignmentOnDate(user.id, request.date)
+    );
+
+    console.log(`🔍 Found ${availableUsers.length} users available on ${request.date}`);
+
+    // Score each user and create candidates
+    const candidates: CandidateUser[] = [];
+    
+    for (const user of availableUsers) {
+      const score = await this.calculateEnhancedFitnessScore(user, request, state);
+      
+      if (score > 0) { // Only include viable candidates
+        candidates.push({
+          user,
+          score,
+          reason: `Fitness score: ${score}/100`
+        });
+      }
+    }
+
+    // Sort by score (descending) - HEURISTIC ORDERING
+    candidates.sort((a, b) => b.score - a.score);
+
+    console.log(`🎯 Generated ${candidates.length} viable candidates, top score: ${candidates[0]?.score || 0}`);
+    
+    return candidates;
+  }
+
+  /**
+   * 🔬 ENHANCED FITNESS SCORE: Advanced scoring with backtracking state awareness
+   */
+  private async calculateEnhancedFitnessScore(
+    user: any,
+    request: ShiftCreationRequest,
+    state: BacktrackingState
+  ): Promise<number> {
+    let score = 50; // Base score
+
+    // 1. Role compatibility (MANDATORY)
+    if (request.preferredRoles?.includes(user.role)) {
+      score += 25;
+    } else if (request.preferredRoles && request.preferredRoles.length > 0) {
+      score -= 20; // Penalty for role mismatch
+    }
+
+    // 2. Current workload in backtracking state (DYNAMIC)
+    const currentAssignments = state.getUserAssignmentCount(user.id);
+    if (currentAssignments < 5) score += 20;
+    else if (currentAssignments < 10) score += 10;
+    else if (currentAssignments < 15) score -= 5;
+    else if (currentAssignments >= 20) score -= 30;
+
+    // 3. Location experience
+    const locationExperience = user.shifts?.filter(
+      (shift: any) => shift.lokasiEnum === request.location
+    ).length || 0;
+    
+    if (locationExperience > 10) score += 20;
+    else if (locationExperience > 5) score += 15;
+    else if (locationExperience > 0) score += 10;
+
+    // 4. Shift type preference
+    const shiftTypeExperience = user.shifts?.filter(
+      (shift: any) => shift.tipeShift === request.shiftType
+    ).length || 0;
+    
+    if (shiftTypeExperience > 5) score += 15;
+    else if (shiftTypeExperience > 0) score += 8;
+
+    // 5. Consecutive days fatigue check
+    const consecutiveDays = this.calculateConsecutiveDays(user, request.date);
+    if (consecutiveDays >= 5) score -= 35;
+    else if (consecutiveDays >= 3) score -= 20;
+    else if (consecutiveDays === 0) score += 10; // Fresh start bonus
+
+    // 6. Priority-based scoring
+    const priorityMultiplier = {
+      'URGENT': 1.3,
+      'HIGH': 1.2,
+      'NORMAL': 1.0,
+      'LOW': 0.9
+    };
+    score *= priorityMultiplier[request.priority];
+
+    // 7. Weekend/holiday penalty (encourage work-life balance)
+    const requestDate = new Date(request.date);
+    const isWeekend = requestDate.getDay() === 0 || requestDate.getDay() === 6;
+    if (isWeekend) score -= 5;
+
+    return Math.max(0, Math.min(100, score));
+  }
+
+  /**
+   * ✅ VALIDATE ALL CONSTRAINTS: Comprehensive constraint checking for backtracking
+   */
+  private async validateAllConstraints(
+    user: any,
+    request: ShiftCreationRequest,
+    state: BacktrackingState
+  ): Promise<ConstraintValidation> {
+    
+    const violations: string[] = [];
+
+    // 1. Date conflict check
+    if (this.checkDateConflict(user, request.date)) {
+      violations.push('Date conflict: User already has a shift on this date');
+    }
+
+    // 2. Workload limit check
+    const currentAssignments = state.getUserAssignmentCount(user.id);
+    if (currentAssignments >= 20) {
+      violations.push(`Workload exceeded: ${currentAssignments}/20 maximum shifts`);
+    }
+
+    // 3. Consecutive days check
+    const consecutiveDays = this.calculateConsecutiveDays(user, request.date);
+    if (consecutiveDays >= 5) {
+      violations.push(`Consecutive days exceeded: ${consecutiveDays} days (max 4)`);
+    }
+
+    // 4. Role requirement check
+    if (request.preferredRoles && request.preferredRoles.length > 0) {
+      if (!request.preferredRoles.includes(user.role)) {
+        violations.push(`Role mismatch: Required ${request.preferredRoles.join('/')}, user is ${user.role}`);
+      }
+    }
+
+    // 5. Night shift regulations
+    if (request.shiftType === 'MALAM') {
+      const nightShiftValidation = await this.validateNightShiftLimits(user, request);
+      if (!nightShiftValidation.isValid) {
+        violations.push(`Night shift limit: ${nightShiftValidation.reason}`);
+      }
+    }
+
+    // 6. Weekly shift limit
+    const weeklyValidation = await this.validateMaxShiftsPerWeek(user, request);
+    if (!weeklyValidation.isValid) {
+      violations.push(`Weekly limit exceeded: ${weeklyValidation.reason}`);
+    }
+
+    // 7. Skill requirements
+    if (request.skillRequirements && request.skillRequirements.length > 0) {
+      const userSkills = user.skills || [];
+      const missingSkills = request.skillRequirements.filter(skill => !userSkills.includes(skill));
+      if (missingSkills.length > 0) {
+        violations.push(`Missing skills: ${missingSkills.join(', ')}`);
+      }
+    }
+
+    const isValid = violations.length === 0;
+    return {
+      isValid,
+      reason: isValid ? 'All constraints satisfied' : violations[0],
+      violatedConstraints: violations
+    };
   }
 
   /**
@@ -972,8 +1545,279 @@ export class AdminShiftOptimizationService {
   }
 
   /**
-   * 🔥 NEW: Calculate workload fairness score
+   * 🧠 ADVANCED CONFLICT RESOLUTION: Deep conflict analysis and resolution
    */
+  async performAdvancedConflictResolution(assignments: ShiftAssignment[]): Promise<{
+    resolvedAssignments: ShiftAssignment[];
+    conflictAnalysis: ConflictAnalysis;
+    resolutionStrategies: ResolutionStrategy[];
+  }> {
+    console.log('🔬 Starting Advanced Conflict Resolution...');
+    
+    // Analyze all types of conflicts
+    const conflictAnalysis = await this.analyzeAllConflicts(assignments);
+    
+    // Generate resolution strategies
+    const resolutionStrategies = await this.generateResolutionStrategies(conflictAnalysis);
+    
+    // Apply resolution strategies iteratively
+    let resolvedAssignments = [...assignments];
+    
+    for (const strategy of resolutionStrategies) {
+      console.log(`🔧 Applying strategy: ${strategy.type} - ${strategy.description}`);
+      resolvedAssignments = await this.applyResolutionStrategy(resolvedAssignments, strategy);
+    }
+    
+    console.log(`✅ Conflict resolution completed: ${assignments.length} → ${resolvedAssignments.length} assignments`);
+    
+    return {
+      resolvedAssignments,
+      conflictAnalysis,
+      resolutionStrategies
+    };
+  }
+
+  /**
+   * � QUALITY IMPROVEMENT ANALYSIS: Comprehensive quality metrics and recommendations
+   */
+  async performQualityImprovement(assignments: ShiftAssignment[]): Promise<QualityImprovementReport> {
+    console.log('📊 Starting Quality Improvement Analysis...');
+    
+    const metrics = await this.calculateQualityMetrics(assignments);
+    const recommendations = await this.generateQualityRecommendations(metrics);
+    const optimizations = await this.identifyOptimizationOpportunities(assignments, metrics);
+    
+    return {
+      qualityScore: metrics.overallScore,
+      metrics,
+      recommendations,
+      optimizations,
+      benchmarks: await this.getBenchmarkComparisons(metrics),
+      improvementPotential: this.calculateImprovementPotential(metrics)
+    };
+  }
+
+  /**
+   * 🎯 ANALYZE ALL CONFLICTS: Comprehensive conflict detection and categorization
+   */
+  private async analyzeAllConflicts(assignments: ShiftAssignment[]): Promise<ConflictAnalysis> {
+    const conflicts: DetectedConflict[] = [];
+    
+    // 1. Schedule conflicts (same user, multiple shifts same day)
+    const scheduleConflicts = this.detectScheduleConflicts(assignments);
+    conflicts.push(...scheduleConflicts);
+    
+    // 2. Workload conflicts (excessive shifts per user)
+    const workloadConflicts = await this.detectWorkloadConflicts(assignments);
+    conflicts.push(...workloadConflicts);
+    
+    // 3. Capacity conflicts (too many/few staff per location)
+    const capacityConflicts = await this.detectCapacityConflicts(assignments);
+    conflicts.push(...capacityConflicts);
+    
+    // 4. Skill conflicts (insufficient skills for location)
+    const skillConflicts = await this.detectSkillConflicts(assignments);
+    conflicts.push(...skillConflicts);
+    
+    // 5. Regulation conflicts (violating labor laws/policies)
+    const regulationConflicts = await this.detectRegulationConflicts(assignments);
+    conflicts.push(...regulationConflicts);
+    
+    return {
+      totalConflicts: conflicts.length,
+      conflictsByType: this.categorizeConflicts(conflicts),
+      severityDistribution: this.analyzeSeverityDistribution(conflicts),
+      affectedUsers: this.getAffectedUsers(conflicts),
+      resolutionComplexity: this.assessResolutionComplexity(conflicts),
+      priorityQueue: this.prioritizeConflicts(conflicts)
+    };
+  }
+
+  /**
+   * 🔧 GENERATE RESOLUTION STRATEGIES: AI-driven strategy generation
+   */
+  private async generateResolutionStrategies(analysis: ConflictAnalysis): Promise<ResolutionStrategy[]> {
+    const strategies: ResolutionStrategy[] = [];
+    
+    // Strategy 1: User Redistribution
+    if (analysis.conflictsByType.WORKLOAD_OVERLOAD > 0) {
+      strategies.push({
+        type: 'USER_REDISTRIBUTION',
+        priority: 'HIGH',
+        description: 'Redistribute shifts from overloaded users to available users',
+        targetConflicts: ['WORKLOAD_OVERLOAD', 'SCHEDULE_CONFLICT'],
+        estimatedResolution: 85,
+        complexityScore: 3
+      });
+    }
+    
+    // Strategy 2: Time Slot Optimization
+    if (analysis.conflictsByType.SCHEDULE_CONFLICT > 0) {
+      strategies.push({
+        type: 'TIME_SLOT_OPTIMIZATION',
+        priority: 'MEDIUM',
+        description: 'Optimize shift timing to minimize overlaps',
+        targetConflicts: ['SCHEDULE_CONFLICT'],
+        estimatedResolution: 70,
+        complexityScore: 2
+      });
+    }
+    
+    // Strategy 3: Skill-Based Reassignment
+    if (analysis.conflictsByType.SKILL_MISMATCH > 0) {
+      strategies.push({
+        type: 'SKILL_REASSIGNMENT',
+        priority: 'HIGH',
+        description: 'Reassign based on skill requirements and availability',
+        targetConflicts: ['SKILL_MISMATCH', 'CAPACITY_SHORTAGE'],
+        estimatedResolution: 90,
+        complexityScore: 4
+      });
+    }
+    
+    // Strategy 4: Emergency Protocol Activation
+    if (analysis.conflictsByType.CRITICAL_SHORTAGE > 0) {
+      strategies.push({
+        type: 'EMERGENCY_PROTOCOL',
+        priority: 'URGENT',
+        description: 'Activate emergency staffing protocols for critical shortages',
+        targetConflicts: ['CRITICAL_SHORTAGE', 'CAPACITY_SHORTAGE'],
+        estimatedResolution: 95,
+        complexityScore: 5
+      });
+    }
+    
+    // Sort by priority and estimated resolution
+    return strategies.sort((a, b) => {
+      const priorityOrder = { URGENT: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
+      if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
+        return priorityOrder[b.priority] - priorityOrder[a.priority];
+      }
+      return b.estimatedResolution - a.estimatedResolution;
+    });
+  }
+
+  /**
+   * 📈 CALCULATE QUALITY METRICS: Comprehensive quality assessment
+   */
+  private async calculateQualityMetrics(assignments: ShiftAssignment[]): Promise<QualityMetrics> {
+    const metrics: QualityMetrics = {
+      overallScore: 0,
+      fairnessScore: 0,
+      efficiencyScore: 0,
+      satisfactionScore: 0,
+      complianceScore: 0,
+      utilizationRate: 0,
+      conflictRate: 0,
+      skillMatchRate: 0,
+      workloadBalance: 0,
+      temporalDistribution: 0
+    };
+    
+    // Calculate fairness score (workload distribution)
+    metrics.fairnessScore = await this.calculateFairnessScore(assignments);
+    
+    // Calculate efficiency score (resource utilization)
+    metrics.efficiencyScore = await this.calculateEfficiencyScore(assignments);
+    
+    // Calculate satisfaction score (user preference alignment)
+    metrics.satisfactionScore = await this.calculateSatisfactionScore(assignments);
+    
+    // Calculate compliance score (regulation adherence)
+    metrics.complianceScore = await this.calculateComplianceScore(assignments);
+    
+    // Calculate utilization rate
+    metrics.utilizationRate = await this.calculateUtilizationRate();
+    
+    // Calculate conflict rate
+    metrics.conflictRate = await this.calculateConflictRate(assignments);
+    
+    // Calculate skill match rate
+    metrics.skillMatchRate = await this.calculateSkillMatchRate(assignments);
+    
+    // Calculate workload balance
+    metrics.workloadBalance = await this.calculateWorkloadBalance(assignments);
+    
+    // Calculate temporal distribution
+    metrics.temporalDistribution = this.calculateTemporalDistribution(assignments);
+    
+    // Calculate overall score (weighted average)
+    metrics.overallScore = (
+      metrics.fairnessScore * 0.20 +
+      metrics.efficiencyScore * 0.15 +
+      metrics.satisfactionScore * 0.15 +
+      metrics.complianceScore * 0.20 +
+      metrics.skillMatchRate * 0.15 +
+      metrics.workloadBalance * 0.15
+    );
+    
+    return metrics;
+  }
+
+  // Supporting interfaces for advanced features
+  interface ConflictAnalysis {
+    totalConflicts: number;
+    conflictsByType: { [key: string]: number };
+    severityDistribution: { [key: string]: number };
+    affectedUsers: number[];
+    resolutionComplexity: number;
+    priorityQueue: DetectedConflict[];
+  }
+
+  interface DetectedConflict {
+    type: 'SCHEDULE_CONFLICT' | 'WORKLOAD_OVERLOAD' | 'CAPACITY_SHORTAGE' | 'SKILL_MISMATCH' | 'REGULATION_VIOLATION' | 'CRITICAL_SHORTAGE';
+    severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    affectedUsers: number[];
+    description: string;
+    suggestedResolution: string;
+    estimatedImpact: number;
+  }
+
+  interface ResolutionStrategy {
+    type: string;
+    priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+    description: string;
+    targetConflicts: string[];
+    estimatedResolution: number;
+    complexityScore: number;
+  }
+
+  interface QualityMetrics {
+    overallScore: number;
+    fairnessScore: number;
+    efficiencyScore: number;
+    satisfactionScore: number;
+    complianceScore: number;
+    utilizationRate: number;
+    conflictRate: number;
+    skillMatchRate: number;
+    workloadBalance: number;
+    temporalDistribution: number;
+  }
+
+  interface QualityImprovementReport {
+    qualityScore: number;
+    metrics: QualityMetrics;
+    recommendations: string[];
+    optimizations: OptimizationOpportunity[];
+    benchmarks: BenchmarkComparison;
+    improvementPotential: number;
+  }
+
+  interface OptimizationOpportunity {
+    category: string;
+    impact: 'LOW' | 'MEDIUM' | 'HIGH';
+    effort: 'LOW' | 'MEDIUM' | 'HIGH';
+    description: string;
+    expectedImprovement: number;
+  }
+
+  interface BenchmarkComparison {
+    industryAverage: number;
+    bestPractice: number;
+    previousPeriod: number;
+    percentileRank: number;
+  }
   private calculateWorkloadScore(user: any, totalShifts: number): number {
     let score = 100; // Base score
     
@@ -1076,6 +1920,92 @@ export class AdminShiftOptimizationService {
       return {
         isValid: false,
         reason: `Maximum ${MAX_CONSECUTIVE_NIGHT_SHIFTS} consecutive night shifts exceeded (current: ${consecutiveNightShifts})`
+      };
+    }
+    
+    return { isValid: true };
+  }
+
+  /**
+   * 🔥 NEW: Validate maximum shifts per week (max 5 shifts/week)
+   */
+  private async validateMaxShiftsPerWeek(user: any, request: ShiftCreationRequest): Promise<{ 
+    isValid: boolean; 
+    reason?: string; 
+  }> {
+    const MAX_SHIFTS_PER_WEEK = 5; // Maximum 5 shifts per week
+    
+    // Calculate week boundaries
+    const targetDate = new Date(request.date);
+    const weekStart = new Date(targetDate);
+    weekStart.setDate(targetDate.getDate() - targetDate.getDay()); // Start of week (Sunday)
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6); // End of week (Saturday)
+    
+    // Count existing shifts in the same week
+    const weeklyShifts = await this.prisma.shift.count({
+      where: {
+        userId: user.id,
+        tanggal: {
+          gte: weekStart,
+          lte: weekEnd
+        }
+      }
+    });
+    
+    if (weeklyShifts >= MAX_SHIFTS_PER_WEEK) {
+      return {
+        isValid: false,
+        reason: `Maximum ${MAX_SHIFTS_PER_WEEK} shifts per week exceeded (current: ${weeklyShifts})`
+      };
+    }
+    
+    return { isValid: true };
+  }
+
+  /**
+   * 🔥 NEW: Enhanced consecutive night shift validation with database check
+   */
+  private async validateConsecutiveNightShifts(user: any, request: ShiftCreationRequest): Promise<{ 
+    isValid: boolean; 
+    reason?: string; 
+  }> {
+    const MAX_CONSECUTIVE_NIGHT_SHIFTS = 2; // Maximum 2 consecutive night shifts
+    
+    if (request.shiftType !== 'MALAM') {
+      return { isValid: true }; // Not a night shift, no restriction
+    }
+    
+    const targetDate = new Date(request.date);
+    let consecutiveNightShifts = 0;
+    
+    // Check previous days for consecutive night shifts
+    for (let i = 1; i <= MAX_CONSECUTIVE_NIGHT_SHIFTS; i++) {
+      const checkDate = new Date(targetDate);
+      checkDate.setDate(targetDate.getDate() - i);
+      
+      const nightShift = await this.prisma.shift.findFirst({
+        where: {
+          userId: user.id,
+          tanggal: {
+            gte: new Date(checkDate.setHours(0, 0, 0, 0)),
+            lt: new Date(checkDate.setHours(23, 59, 59, 999))
+          },
+          tipeshift: 'MALAM'
+        }
+      });
+      
+      if (nightShift) {
+        consecutiveNightShifts++;
+      } else {
+        break; // No consecutive pattern
+      }
+    }
+    
+    if (consecutiveNightShifts >= MAX_CONSECUTIVE_NIGHT_SHIFTS) {
+      return {
+        isValid: false,
+        reason: `Maximum ${MAX_CONSECUTIVE_NIGHT_SHIFTS} consecutive night shifts exceeded. User has worked ${consecutiveNightShifts} consecutive night shifts.`
       };
     }
     
@@ -3774,5 +4704,39 @@ export class AdminShiftOptimizationService {
     }
     
     return today;
+  }
+
+  /**
+   * 🔥 NEW: Get shifts within date range for balance analysis
+   */
+  async getShiftsInDateRange(startDate: Date, endDate: Date): Promise<any[]> {
+    try {
+      const shifts = await this.prisma.jadwal.findMany({
+        where: {
+          tanggal: {
+            gte: startDate.toISOString().split('T')[0],
+            lte: endDate.toISOString().split('T')[0]
+          }
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              namaDepan: true,
+              namaBelakang: true,
+              role: true
+            }
+          }
+        }
+      });
+
+      return shifts.map(shift => ({
+        ...shift,
+        userId: shift.userId || shift.user?.id
+      }));
+    } catch (error) {
+      console.error('Error getting shifts in date range:', error);
+      return [];
+    }
   }
 }

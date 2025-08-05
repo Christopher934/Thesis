@@ -19,7 +19,9 @@ import {
   Loader2,
   CheckCircle,
   Plus,
-  X
+  X,
+  Star,
+  Award
 } from 'lucide-react';
 
 // Import components
@@ -28,6 +30,9 @@ import NotificationCenter from '@/components/dashboard/NotificationCenter';
 import RecentActivity from '@/components/dashboard/RecentActivity';
 import TodaySchedule from '@/components/dashboard/TodaySchedule';
 import ShiftManagementDashboard from '@/components/dashboard/ShiftManagementDashboard';
+import EmployeePreferencesModal from '@/components/modals/EmployeePreferencesModal';
+import ShiftRequirementsModal from '@/components/modals/ShiftRequirementsModal';
+import WorkloadAnalysisModal from '@/components/modals/WorkloadAnalysisModal';
 
 // Force dynamic rendering for real-time admin dashboard data
 export const dynamic = 'force-dynamic';
@@ -95,6 +100,14 @@ const AdminPage: React.FC = () => {
   const [isAutoScheduling, setIsAutoScheduling] = useState(false);
   const [autoScheduleError, setAutoScheduleError] = useState<string | null>(null);
   const [autoScheduleResult, setAutoScheduleResult] = useState<AutoScheduleResult | null>(null);
+
+  // New modal states for enhanced features
+  const [isPreferencesModalOpen, setIsPreferencesModalOpen] = useState(false);
+  const [isRequirementsModalOpen, setIsRequirementsModalOpen] = useState(false);
+  const [isWorkloadAnalysisModalOpen, setIsWorkloadAnalysisModalOpen] = useState(false);
+  const [selectedLocation, setSelectedLocation] = useState('ICU');
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
   // Initialize data
   useEffect(() => {
@@ -293,8 +306,108 @@ const AdminPage: React.FC = () => {
           <ShiftManagementDashboard />
         </div>
 
+        {/* Enhanced Quick Actions Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <div className="bg-white rounded-lg shadow p-6 text-center">
+            <Calendar className="w-8 h-8 mx-auto mb-3 text-blue-600" />
+            <h3 className="font-semibold mb-2">Manajemen Jadwal</h3>
+            <button 
+              onClick={() => window.location.href = '/dashboard/list/managemenjadwal'}
+              className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
+            >
+              Kelola Jadwal
+            </button>
+          </div>
+
+          <div className="bg-white rounded-lg shadow p-6 text-center">
+            <Brain className="w-8 h-8 mx-auto mb-3 text-purple-600" />
+            <h3 className="font-semibold mb-2">Auto Schedule AI</h3>
+            <button
+              onClick={() => setIsAutoScheduleModalOpen(true)}
+              className="w-full px-4 py-2 bg-gradient-to-r from-purple-500 to-blue-600 text-white rounded-md hover:from-purple-600 hover:to-blue-700 text-sm"
+            >
+              Jalankan AI
+            </button>
+          </div>
+
+          <div className="bg-white rounded-lg shadow p-6 text-center">
+            <Users className="w-8 h-8 mx-auto mb-3 text-green-600" />
+            <h3 className="font-semibold mb-2">Manajemen Pegawai</h3>
+            <button 
+              onClick={() => window.location.href = '/dashboard/list/pegawai'}
+              className="w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm"
+            >
+              Kelola Pegawai
+            </button>
+          </div>
+
+          <div className="bg-white rounded-lg shadow p-6 text-center">
+            <BarChart3 className="w-8 h-8 mx-auto mb-3 text-orange-600" />
+            <h3 className="font-semibold mb-2">Laporan</h3>
+            <button 
+              onClick={() => window.location.href = '/dashboard/list/laporan'}
+              className="w-full px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 text-sm"
+            >
+              Lihat Laporan
+            </button>
+          </div>
+        </div>
+
+        {/* Advanced Features Grid */}
+        <div className="mb-8">
+          <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+            <Settings className="w-6 h-6" />
+            Fitur Lanjutan
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white rounded-lg shadow p-6 text-center">
+              <Star className="w-8 h-8 mx-auto mb-3 text-indigo-600" />
+              <h3 className="font-semibold mb-2">Preferensi Pegawai</h3>
+              <button 
+                onClick={() => setIsPreferencesModalOpen(true)}
+                className="w-full px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm"
+              >
+                Kelola Preferensi
+              </button>
+            </div>
+
+            <div className="bg-white rounded-lg shadow p-6 text-center">
+              <Settings className="w-8 h-8 mx-auto mb-3 text-cyan-600" />
+              <h3 className="font-semibold mb-2">Persyaratan Shift</h3>
+              <button 
+                onClick={() => setIsRequirementsModalOpen(true)}
+                className="w-full px-4 py-2 bg-cyan-600 text-white rounded-md hover:bg-cyan-700 text-sm"
+              >
+                Atur Persyaratan
+              </button>
+            </div>
+
+            <div className="bg-white rounded-lg shadow p-6 text-center">
+              <TrendingUp className="w-8 h-8 mx-auto mb-3 text-emerald-600" />
+              <h3 className="font-semibold mb-2">Analisis Beban Kerja</h3>
+              <button 
+                onClick={() => setIsWorkloadAnalysisModalOpen(true)}
+                className="w-full px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 text-sm"
+              >
+                Lihat Analisis
+              </button>
+            </div>
+
+            <div className="bg-white rounded-lg shadow p-6 text-center">
+              <Award className="w-8 h-8 mx-auto mb-3 text-amber-600" />
+              <h3 className="font-semibold mb-2">Fairness Scoring</h3>
+              <button 
+                onClick={() => window.location.href = '/dashboard/list/fairness-report'}
+                className="w-full px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700 text-sm"
+              >
+                Lihat Skor
+              </button>
+            </div>
+          </div>
+        </div>
+
         {/* Quick Actions Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8" style={{display: 'none'}}>
           <div className="bg-white rounded-lg shadow p-6 text-center">
             <Calendar className="w-8 h-8 mx-auto mb-3 text-blue-600" />
             <h3 className="font-semibold mb-2">Manajemen Jadwal</h3>
@@ -914,6 +1027,41 @@ const AdminPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Employee Preferences Modal */}
+      <EmployeePreferencesModal
+        isOpen={isPreferencesModalOpen}
+        onClose={() => setIsPreferencesModalOpen(false)}
+        onSave={(preferences) => {
+          console.log('Preferences saved:', preferences);
+          // Refresh dashboard data
+          fetchDashboardData();
+        }}
+        isAdmin={true}
+      />
+
+      {/* Shift Requirements Modal */}
+      <ShiftRequirementsModal
+        isOpen={isRequirementsModalOpen}
+        onClose={() => setIsRequirementsModalOpen(false)}
+        onSave={(requirements) => {
+          console.log('Requirements saved:', requirements);
+          // Refresh dashboard data
+          fetchDashboardData();
+        }}
+        location={selectedLocation}
+        month={selectedMonth}
+        year={selectedYear}
+      />
+
+      {/* Workload Analysis Modal */}
+      <WorkloadAnalysisModal
+        isOpen={isWorkloadAnalysisModalOpen}
+        onClose={() => setIsWorkloadAnalysisModalOpen(false)}
+        location={selectedLocation}
+        month={selectedMonth}
+        year={selectedYear}
+      />
     </div>
   );
 };

@@ -1,6 +1,5 @@
 'use client';
 
-
 // Force dynamic rendering for real-time schedule management data
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +21,7 @@ import InteractiveCalendar from '@/components/enhanced/InteractiveCalendar';
 import EnhancedManualShiftModal from '@/components/enhanced/EnhancedManualShiftModal';
 import EnhancedJadwalForm from '@/components/forms/EnhancedJadwalForm';
 import RealTimeWorkloadValidator from '@/components/RealTimeWorkloadValidator';
+import { ShiftBalanceAnalyzer } from '@/components/ShiftBalanceAnalyzer';
 
 // Enhanced utility functions
 const joinUrl = (base: string, path: string) => {
@@ -820,6 +820,7 @@ const ManagemenJadwalPage = () => {
     const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
     const [isWorkloadModalOpen, setIsWorkloadModalOpen] = useState(false);
     const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+    const [isBalanceAnalyzerOpen, setIsBalanceAnalyzerOpen] = useState(false);
     const [previewData, setPreviewData] = useState<any>(null);
     const [workloadData, setWorkloadData] = useState<any>(null);
     const [resetData, setResetData] = useState<any>(null);
@@ -1237,24 +1238,6 @@ const ManagemenJadwalPage = () => {
         
         try {
             console.log('✅ Confirming weekly schedule creation...');
-            
-            const token = localStorage.getItem('token');
-            if (!token) {
-                throw new Error('Token tidak ditemukan');
-            }
-
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-            const response = await fetch(`${apiUrl}/admin/shift-optimization/create-weekly-schedule`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(weeklyRequest),
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json();
             
             const token = localStorage.getItem('token');
             if (!token) {
@@ -1700,6 +1683,12 @@ const ManagemenJadwalPage = () => {
             }
 
             const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+            
+            // Generate date range for preview (next 7 days)
+            const startDate = new Date();
+            const endDate = new Date();
+            endDate.setDate(startDate.getDate() + 7);
+            
             const response = await fetch(`${apiUrl}/admin/shift-optimization/preview-optimal-shifts`, {
                 method: 'POST',
                 headers: {
@@ -1707,12 +1696,9 @@ const ManagemenJadwalPage = () => {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    date: new Date().toISOString().split('T')[0],
-                    locations: ['ICU', 'RAWAT_INAP', 'GAWAT_DARURAT'],
-                    workloadLimits: {
-                        maxShiftsPerPerson: 20,
-                        maxConsecutiveDays: 5
-                    }
+                    startDate: startDate.toISOString().split('T')[0],
+                    endDate: endDate.toISOString().split('T')[0],
+                    schedulingType: 'weekly'
                 }),
             });
 
@@ -1722,18 +1708,24 @@ const ManagemenJadwalPage = () => {
             }
 
             const result = await response.json();
+            console.log('🔍 Preview result:', result); // Debug log
+            
             setPreviewData(result);
             setIsPreviewModalOpen(true);
             
             showNotificationModal({
                 type: 'info',
                 title: 'Preview Jadwal Optimal',
-                message: `Menampilkan ${result.assignments?.length || 0} assignment yang akan dibuat`,
+                message: `Menampilkan ${result.preview?.length || 0} assignment yang akan dibuat`,
                 details: {
-                    workloadDistribution: result.workloadAnalysis,
-                    fairnessScore: result.fairnessScore,
-                    conflictsDetected: result.conflicts?.length || 0
+                    workloadDistribution: result.statistics?.workloadDistribution,
+                    fairnessScore: result.statistics?.fulfillmentRate,
+                    conflictsDetected: result.statistics?.conflicts?.length || 0,
+                    totalRequested: result.statistics?.totalRequested,
+                    totalAssigned: result.statistics?.totalAssigned,
+                    recommendations: result.recommendations
                 }
+            });
             });
         } catch (error: any) {
             console.error('Preview error:', error);
@@ -1814,6 +1806,107 @@ const ManagemenJadwalPage = () => {
         }
     };
 
+    // 🔥 NEW FEATURE 3: Confirm and Create Shifts from Preview
+    const handleConfirmAndCreateShifts = async () => {
+        if (!previewData?.preview || previewData.preview.length === 0) {
+            showNotificationModal({
+                type: 'error',
+                title: 'Tidak Ada Data Preview',
+                message: 'Tidak ada shift yang dapat dikonfirmasi',
+                details: {
+                    timestamp: new Date().toLocaleString('id-ID'),
+                    recommendations: ['Lakukan preview terlebih dahulu sebelum konfirmasi']
+                }
+            });
+            return;
+        }
+
+        setIsAutoScheduling(true);
+        
+        try {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                throw new Error('Token tidak ditemukan');
+            }
+
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+            
+            // Convert preview data to the format expected by backend
+            const assignments = previewData.preview.map((assignment: any) => ({
+                userId: assignment.userId,
+                date: assignment.date,
+                location: assignment.location,
+                shiftType: assignment.shiftType,
+                priority: assignment.priority,
+                score: assignment.score
+            }));
+
+            const response = await fetch(`${apiUrl}/admin/shift-optimization/confirm-shifts`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    assignments,
+                    metadata: {
+                        source: 'preview-confirmation',
+                        originalRequests: previewData.statistics?.totalRequested,
+                        timestamp: new Date().toISOString()
+                    }
+                }),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'Gagal mengkonfirmasi shift');
+            }
+
+            const result = await response.json();
+            
+            // Close preview modal
+            setIsPreviewModalOpen(false);
+            
+            // Show success notification
+            showNotificationModal({
+                type: 'success',
+                title: 'Jadwal Berhasil Dibuat',
+                message: `${result.summary?.totalCreated || assignments.length} shift berhasil dibuat dari preview`,
+                details: {
+                    createdShifts: result.summary?.totalCreated || assignments.length,
+                    errors: result.summary?.errors?.length || 0,
+                    source: 'Preview Confirmation',
+                    timestamp: new Date().toLocaleString('id-ID'),
+                    recommendations: [
+                        'Data shift telah tersimpan di database',
+                        'Refresh halaman untuk melihat perubahan'
+                    ]
+                }
+            });
+            
+            // Set pending refresh to update the table
+            setPendingRefresh(true);
+            
+        } catch (error: any) {
+            console.error('Confirm shifts error:', error);
+            showNotificationModal({
+                type: 'error',
+                title: 'Gagal Mengkonfirmasi Shift',
+                message: error.message,
+                details: {
+                    timestamp: new Date().toLocaleString('id-ID'),
+                    recommendations: [
+                        'Periksa koneksi internet',
+                        'Pastikan server backend berjalan',
+                        'Coba ulangi proses preview dan konfirmasi'
+                    ]
+                }
+            });
+        } finally {
+            setIsAutoScheduling(false);
+        }
+    };
+
     // 🔥 NEW FEATURE 3: Reset Auto-Generated Shifts
     const handleResetAutoShifts = async () => {
         setIsResetting(true);
@@ -1871,6 +1964,88 @@ const ManagemenJadwalPage = () => {
             });
         } finally {
             setIsResetting(false);
+        }
+    };
+
+    // 🔥 NEW FEATURE: Handle Balance Recommendation Implementation
+    const handleImplementRecommendation = async (recommendation: any) => {
+        try {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                throw new Error('Token tidak ditemukan');
+            }
+
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+            
+            // Show confirmation dialog
+            const confirmed = await showConfirmationModal({
+                title: 'Terapkan Rekomendasi',
+                message: `Apakah Anda yakin ingin menerapkan rekomendasi "${recommendation.type}"? \n\n${recommendation.message}`,
+                confirmText: 'Terapkan',
+                cancelText: 'Batal',
+                type: 'info'
+            });
+
+            if (!confirmed) return;
+
+            // Call backend to implement the recommendation
+            const response = await fetch(`${apiUrl}/admin/shift-optimization/implement-balance-recommendation`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    recommendationType: recommendation.type,
+                    affectedUsers: recommendation.affectedUsers,
+                    suggestedActions: recommendation.suggestedActions,
+                    severity: recommendation.severity
+                }),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'Gagal menerapkan rekomendasi');
+            }
+
+            const result = await response.json();
+            
+            showNotificationModal({
+                type: 'success',
+                title: 'Rekomendasi Berhasil Diterapkan',
+                message: `${result.implementedActions || 0} tindakan berhasil diterapkan`,
+                details: {
+                    affectedShifts: result.affectedShifts || 0,
+                    improvedUsers: result.improvedUsers || 0,
+                    balanceScore: result.newBalanceScore || 'N/A',
+                    timestamp: new Date().toLocaleString('id-ID'),
+                    recommendations: [
+                        'Refresh halaman untuk melihat perubahan',
+                        'Monitor keseimbangan dalam beberapa hari ke depan',
+                        'Lakukan analisis ulang jika diperlukan'
+                    ]
+                }
+            });
+
+            // Refresh data and close analyzer
+            setPendingRefresh(true);
+            setIsBalanceAnalyzerOpen(false);
+            
+        } catch (error: any) {
+            console.error('Implement recommendation error:', error);
+            showNotificationModal({
+                type: 'error',
+                title: 'Gagal Menerapkan Rekomendasi',
+                message: error.message,
+                details: {
+                    timestamp: new Date().toLocaleString('id-ID'),
+                    recommendations: [
+                        'Periksa koneksi internet',
+                        'Pastikan Anda memiliki akses admin',
+                        'Coba lagi dalam beberapa saat'
+                    ]
+                }
+            });
         }
     };
 
@@ -2973,6 +3148,30 @@ const ManagemenJadwalPage = () => {
                         className="flex items-center gap-2 px-6 py-3 rounded-lg bg-gradient-to-r from-teal-500 to-cyan-600 text-white hover:from-teal-600 hover:to-cyan-700 transition-all shadow-md text-sm font-medium"
                         onClick={handleAnalyzeWorkload}
                         disabled={isLoadingWorkload}
+                        title="Analisis beban kerja dan distribusi shift"
+                    >
+                        {isLoadingWorkload ? (
+                            <>
+                                <Loader2 className="animate-spin w-4 h-4" />
+                                Loading...
+                            </>
+                        ) : (
+                            <>
+                                <BarChart3 className="w-4 h-4" />
+                                Analisis Beban
+                            </>
+                        )}
+                    </button>
+
+                    {/* 🔥 NEW: Balance Analyzer Button */}
+                    <button 
+                        className="flex items-center gap-2 px-6 py-3 rounded-lg bg-gradient-to-r from-emerald-500 to-green-600 text-white hover:from-emerald-600 hover:to-green-700 transition-all shadow-md text-sm font-medium"
+                        onClick={() => setIsBalanceAnalyzerOpen(true)}
+                        title="Analisis keseimbangan shift: variasi, rotasi, dan keadilan"
+                    >
+                        <Shield className="w-4 h-4" />
+                        Analisis Keseimbangan
+                    </button>
                         title="Analisis distribusi beban kerja pegawai"
                     >
                         {isLoadingWorkload ? (
@@ -4217,6 +4416,13 @@ const ManagemenJadwalPage = () => {
                 notification={notificationData}
             />
 
+            {/* 🔥 NEW: Shift Balance Analyzer */}
+            <ShiftBalanceAnalyzer
+                isOpen={isBalanceAnalyzerOpen}
+                onClose={() => setIsBalanceAnalyzerOpen(false)}
+                onImplementRecommendation={handleImplementRecommendation}
+            />
+
             {/* Confirmation Modal */}
             {showConfirmation && confirmationData && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -4293,22 +4499,26 @@ const ManagemenJadwalPage = () => {
                                 </button>
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
                                 <div className="bg-blue-50 p-4 rounded-lg">
-                                    <div className="text-2xl font-bold text-blue-600">{previewData.assignments?.length || 0}</div>
-                                    <div className="text-sm text-gray-600">Total Assignments</div>
+                                    <div className="text-2xl font-bold text-blue-600">{previewData.statistics?.totalRequested || 0}</div>
+                                    <div className="text-sm text-gray-600">Total Diminta</div>
                                 </div>
                                 <div className="bg-green-50 p-4 rounded-lg">
-                                    <div className="text-2xl font-bold text-green-600">{previewData.fairnessScore || 0}%</div>
-                                    <div className="text-sm text-gray-600">Fairness Score</div>
+                                    <div className="text-2xl font-bold text-green-600">{previewData.statistics?.totalAssigned || 0}</div>
+                                    <div className="text-sm text-gray-600">Berhasil Diassign</div>
+                                </div>
+                                <div className="bg-purple-50 p-4 rounded-lg">
+                                    <div className="text-2xl font-bold text-purple-600">{previewData.statistics?.fulfillmentRate?.toFixed(1) || 0}%</div>
+                                    <div className="text-sm text-gray-600">Tingkat Pemenuhan</div>
                                 </div>
                                 <div className="bg-orange-50 p-4 rounded-lg">
-                                    <div className="text-2xl font-bold text-orange-600">{previewData.conflicts?.length || 0}</div>
-                                    <div className="text-sm text-gray-600">Conflicts Detected</div>
+                                    <div className="text-2xl font-bold text-orange-600">{previewData.statistics?.conflicts?.length || 0}</div>
+                                    <div className="text-sm text-gray-600">Konflik Terdeteksi</div>
                                 </div>
                             </div>
 
-                            {previewData.assignments && previewData.assignments.length > 0 && (
+                            {previewData.preview && previewData.preview.length > 0 && (
                                 <div className="mb-6">
                                     <h3 className="text-lg font-semibold mb-3">Assignments to be Created</h3>
                                     <div className="max-h-60 overflow-y-auto">
@@ -4316,22 +4526,57 @@ const ManagemenJadwalPage = () => {
                                             <thead className="bg-gray-50">
                                                 <tr>
                                                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Employee</th>
+                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
                                                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
                                                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Location</th>
                                                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Shift</th>
+                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-200">
-                                                {previewData.assignments.map((assignment: any, index: number) => (
+                                                {previewData.preview.map((assignment: any, index: number) => (
                                                     <tr key={index}>
-                                                        <td className="px-4 py-2 text-sm text-gray-900">{assignment.employeeName}</td>
+                                                        <td className="px-4 py-2 text-sm text-gray-900">{assignment.userName}</td>
+                                                        <td className="px-4 py-2 text-sm text-gray-900">
+                                                            <span className={`px-2 py-1 rounded-full text-xs ${
+                                                                assignment.userRole === 'PERAWAT' ? 'bg-blue-100 text-blue-800' :
+                                                                assignment.userRole === 'DOKTER' ? 'bg-purple-100 text-purple-800' :
+                                                                'bg-gray-100 text-gray-800'
+                                                            }`}>
+                                                                {assignment.userRole}
+                                                            </span>
+                                                        </td>
                                                         <td className="px-4 py-2 text-sm text-gray-900">{assignment.date}</td>
                                                         <td className="px-4 py-2 text-sm text-gray-900">{assignment.location}</td>
-                                                        <td className="px-4 py-2 text-sm text-gray-900">{assignment.shiftType}</td>
+                                                        <td className="px-4 py-2 text-sm text-gray-900">
+                                                            <span className={`px-2 py-1 rounded-full text-xs ${
+                                                                assignment.shiftType === 'PAGI' ? 'bg-yellow-100 text-yellow-800' :
+                                                                assignment.shiftType === 'SIANG' ? 'bg-orange-100 text-orange-800' :
+                                                                assignment.shiftType === 'MALAM' ? 'bg-indigo-100 text-indigo-800' :
+                                                                'bg-gray-100 text-gray-800'
+                                                            }`}>
+                                                                {assignment.shiftType}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-4 py-2 text-sm text-gray-900">{assignment.score?.toFixed(2) || 'N/A'}</td>
                                                     </tr>
                                                 ))}
                                             </tbody>
                                         </table>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Recommendations Section */}
+                            {previewData.recommendations && previewData.recommendations.length > 0 && (
+                                <div className="mb-6">
+                                    <h3 className="text-lg font-semibold mb-3">Rekomendasi Sistem</h3>
+                                    <div className="bg-blue-50 p-4 rounded-lg">
+                                        <ul className="list-disc list-inside space-y-1 text-sm text-blue-800">
+                                            {previewData.recommendations.map((rec: string, index: number) => (
+                                                <li key={index}>{rec}</li>
+                                            ))}
+                                        </ul>
                                     </div>
                                 </div>
                             )}
@@ -4341,8 +4586,17 @@ const ManagemenJadwalPage = () => {
                                     onClick={() => setIsPreviewModalOpen(false)}
                                     className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
                                 >
-                                    Close
+                                    Batal
                                 </button>
+                                {previewData.preview && previewData.preview.length > 0 && (
+                                    <button
+                                        onClick={handleConfirmAndCreateShifts}
+                                        className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
+                                    >
+                                        <CheckCircle className="w-4 h-4" />
+                                        Konfirmasi & Buat Jadwal
+                                    </button>
+                                )}
                             </div>
                         </div>
                     </div>
