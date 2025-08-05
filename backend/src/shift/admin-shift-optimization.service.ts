@@ -229,6 +229,213 @@ export class AdminShiftOptimizationService {
   }
 
   /**
+   * 🔥 NEW: Preview optimal shift assignments WITHOUT saving to database
+   */
+  async previewOptimalShiftAssignments(requests: ShiftCreationRequest[]): Promise<{
+    preview: any[];
+    statistics: {
+      totalRequested: number;
+      totalAssigned: number;
+      fulfillmentRate: number;
+      workloadDistribution: { [userId: number]: number };
+      conflicts: any[];
+      warnings: any[];
+    };
+    recommendations: string[];
+  }> {
+    console.log(`👁️ Previewing optimal shift assignments for ${requests.length} requests`);
+    
+    // Step 1: Get available users with their current workload
+    const availableUsers = await this.getAvailableUsersWithWorkload();
+    
+    // Step 2: Check location capacity for each request
+    const locationCapacityStatus = await Promise.all(
+      requests.map(req => this.checkLocationCapacity(req))
+    );
+    
+    // Step 3: Apply Greedy Algorithm first (fast initial assignment)
+    const greedyAssignments = await this.greedyAssignment(requests, availableUsers);
+    
+    // Step 4: Apply Backtracking to optimize conflicts
+    const optimizedAssignments = await this.backtrackingOptimization(
+      greedyAssignments,
+      availableUsers
+    );
+    
+    // Step 5: Generate workload alerts
+    const workloadAlerts = await this.generateWorkloadAlerts();
+    
+    // Step 6: Identify remaining conflicts
+    const conflicts = await this.identifyConflicts(optimizedAssignments);
+    
+    // Step 7: Calculate statistics
+    const totalRequested = requests.reduce((sum, req) => sum + req.requiredCount, 0);
+    const totalAssigned = optimizedAssignments.length;
+    const fulfillmentRate = totalRequested > 0 ? (totalAssigned / totalRequested) * 100 : 100;
+    
+    // Step 8: Calculate workload distribution
+    const workloadDistribution: { [userId: number]: number } = {};
+    optimizedAssignments.forEach(assignment => {
+      workloadDistribution[assignment.userId] = (workloadDistribution[assignment.userId] || 0) + 1;
+    });
+    
+    // Step 9: Generate recommendations
+    const recommendations = this.generateOptimizationRecommendations(
+      conflicts, 
+      workloadAlerts, 
+      locationCapacityStatus
+    );
+
+    // Step 10: Format preview data
+    const preview = optimizedAssignments.map(assignment => ({
+      userId: assignment.userId,
+      userName: availableUsers.find(u => u.id === assignment.userId)?.namaDepan + ' ' + 
+                availableUsers.find(u => u.id === assignment.userId)?.namaBelakang,
+      userRole: availableUsers.find(u => u.id === assignment.userId)?.role,
+      date: assignment.shiftDetails.date,
+      location: assignment.shiftDetails.location,
+      shiftType: assignment.shiftDetails.shiftType,
+      priority: assignment.shiftDetails.priority,
+      score: assignment.score,
+      reason: assignment.reason
+    }));
+    
+    return {
+      preview,
+      statistics: {
+        totalRequested,
+        totalAssigned,
+        fulfillmentRate,
+        workloadDistribution,
+        conflicts,
+        warnings: workloadAlerts.filter(alert => alert.status !== 'NORMAL')
+      },
+      recommendations
+    };
+  }
+
+  /**
+   * 🔥 NEW: Confirm and save previewed shifts to database
+   */
+  async confirmAndSaveShifts(assignments: any[]): Promise<{
+    success: boolean;
+    createdShifts: any[];
+    summary: {
+      totalCreated: number;
+      errors: any[];
+    };
+  }> {
+    console.log(`✅ Confirming and saving ${assignments.length} shift assignments to database`);
+    
+    try {
+      const errors: any[] = [];
+      const createdShifts: any[] = [];
+      
+      for (const assignment of assignments) {
+        try {
+          // Validate assignment is still valid (double-check)
+          const user = await this.prisma.user.findUnique({
+            where: { id: assignment.userId },
+            include: { shifts: true }
+          });
+          
+          if (!user) {
+            errors.push({
+              assignment,
+              error: 'User not found',
+              severity: 'HIGH'
+            });
+            continue;
+          }
+          
+          // Check for conflicts again (in case data changed)
+          const hasConflict = this.checkDateConflict(user, assignment.date);
+          if (hasConflict) {
+            errors.push({
+              assignment,
+              error: 'Schedule conflict detected',
+              severity: 'MEDIUM'
+            });
+            continue;
+          }
+          
+          // Validate night shift limits
+          const nightShiftValidation = this.validateNightShiftLimits(user, {
+            shiftType: assignment.shiftType,
+            date: assignment.date,
+            location: assignment.location,
+            requiredCount: 1,
+            priority: assignment.priority
+          });
+          
+          if (!nightShiftValidation.isValid) {
+            errors.push({
+              assignment,
+              error: nightShiftValidation.reason,
+              severity: 'HIGH'
+            });
+            continue;
+          }
+          
+          // Create the shift
+          const createdShift = await this.createSingleShift(assignment);
+          createdShifts.push(createdShift);
+          
+        } catch (error) {
+          errors.push({
+            assignment,
+            error: error.message,
+            severity: 'CRITICAL'
+          });
+        }
+      }
+      
+      return {
+        success: errors.filter(e => e.severity === 'CRITICAL').length === 0,
+        createdShifts,
+        summary: {
+          totalCreated: createdShifts.length,
+          errors
+        }
+      };
+      
+    } catch (error) {
+      throw new Error(`Failed to confirm shifts: ${error.message}`);
+    }
+  }
+
+  /**
+   * Helper method to create a single shift in database
+   */
+  private async createSingleShift(assignment: any): Promise<any> {
+    const shiftStartTime = this.getShiftStartTime(assignment.shiftType);
+    const shiftEndTime = this.getShiftEndTime(assignment.shiftType);
+    
+    return await this.prisma.shift.create({
+      data: {
+        userId: assignment.userId,
+        tanggal: new Date(assignment.date),
+        jammulai: shiftStartTime,
+        jamselesai: shiftEndTime,
+        lokasishift: assignment.location, // Fixed: lokasishift as required by Prisma schema
+        lokasiEnum: assignment.location,   // Keep enum for type safety
+        tipeshift: assignment.shiftType,
+        notes: `Auto-generated by optimization algorithm. Score: ${assignment.score}. Reason: ${assignment.reason}`
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            namaDepan: true,
+            namaBelakang: true,
+            role: true
+          }
+        }
+      }
+    });
+  }
+
+  /**
    * GREEDY ALGORITHM: Assign shifts to best available users first
    */
   private async greedyAssignment(
@@ -240,6 +447,10 @@ export class AdminShiftOptimizationService {
     
     console.log(`🎯 Greedy Assignment: Processing ${requests.length} requests with ${availableUsers.length} users`);
     
+    // 🔥 NEW: Sort users by workload before processing (workload balancing)
+    const balancedUsers = await this.sortUsersByWorkload(availableUsers);
+    console.log(`⚖️ Workload Balancing: Users sorted by shift count (least busy first)`);
+    
     // Sort requests by priority (URGENT -> HIGH -> NORMAL -> LOW)
     const sortedRequests = requests.sort((a, b) => {
       const priorityOrder = { URGENT: 4, HIGH: 3, NORMAL: 2, LOW: 1 };
@@ -249,24 +460,28 @@ export class AdminShiftOptimizationService {
     for (const request of sortedRequests) {
       console.log(`📋 Processing request for ${request.location} on ${request.date}, need ${request.requiredCount} users`);
       
-      // Calculate fitness score for each user for this shift
-      const userScores = availableUsers.map(user => ({
+      // 🔥 ENHANCED: Calculate fitness score with workload balancing
+      const userScores = balancedUsers.map(user => ({
         user,
-        score: this.calculateUserFitnessScore(user, request),
-        currentAssignments: userAssignmentCount.get(user.id) || 0
+        score: this.calculateEnhancedFitnessScore(user, request, userAssignmentCount.get(user.id) || 0),
+        currentAssignments: userAssignmentCount.get(user.id) || 0,
+        totalShifts: user.totalShifts || 0
       }));
       
-      console.log(`📊 User scores:`, userScores.slice(0, 5).map(us => ({ 
+      console.log(`📊 Top candidates:`, userScores.slice(0, 5).map(us => ({ 
         userId: us.user.id, 
-        score: us.score 
+        name: `${us.user.namaDepan} ${us.user.namaBelakang}`,
+        score: us.score,
+        totalShifts: us.totalShifts,
+        currentAssignments: us.currentAssignments
       })));
       
-      // Sort by score (highest first)
+      // Sort by enhanced score (highest first) - already considers workload balancing
       userScores.sort((a, b) => b.score - a.score);
       
       // Greedily assign to top N users (based on requiredCount)
       const selectedUsers = userScores
-        .filter(us => us.score >= 20) // Lower minimum fitness threshold to allow more assignments
+        .filter(us => us.score >= 30) // Slightly higher threshold for quality
         .slice(0, request.requiredCount);
         
       console.log(`✅ Selected ${selectedUsers.length}/${request.requiredCount} users for this request`);
@@ -276,7 +491,7 @@ export class AdminShiftOptimizationService {
           userId: userScore.user.id,
           shiftDetails: request,
           score: userScore.score,
-          reason: `Greedy selection: score ${userScore.score}/100`
+          reason: `Workload-balanced selection: score ${userScore.score}/100, shifts: ${userScore.totalShifts}`
         });
         
         // Update assignment count
@@ -364,6 +579,65 @@ export class AdminShiftOptimizationService {
     // Availability check
     const hasConflict = this.checkDateConflict(user, request.date);
     if (hasConflict) score = 0; // Unavailable
+    
+    return Math.max(0, Math.min(100, score));
+  }
+
+  /**
+   * 🔥 NEW: Enhanced fitness score with improved workload balancing
+   */
+  private calculateEnhancedFitnessScore(user: any, request: ShiftCreationRequest, currentAssignments: number): number {
+    let score = 50; // Base score
+    
+    // 1. Role compatibility (highest priority)
+    if (request.preferredRoles?.includes(user.role)) {
+      score += 30;
+    }
+    
+    // 2. Workload balancing (major factor)
+    const totalShifts = user.totalShifts || 0;
+    const maxShifts = this.getMaxShiftsForRole(user.role);
+    const utilizationRate = (totalShifts / maxShifts) * 100;
+    
+    if (utilizationRate < 30) score += 25; // Highly underutilized - priority
+    else if (utilizationRate < 50) score += 20; // Moderately underutilized
+    else if (utilizationRate < 70) score += 10; // Normal range
+    else if (utilizationRate < 85) score -= 5; // Getting busy
+    else if (utilizationRate < 95) score -= 15; // Very busy
+    else score -= 30; // Overworked - avoid
+    
+    // 3. Current assignments in this batch (prevent over-assignment)
+    if (currentAssignments === 0) score += 15; // Bonus for not assigned yet
+    else if (currentAssignments === 1) score += 5; // Slight bonus
+    else score -= (currentAssignments * 10); // Penalty for multiple assignments
+    
+    // 4. Location experience
+    const locationExperience = user.shifts?.filter(
+      (shift: any) => shift.lokasiEnum === request.location
+    ).length || 0;
+    
+    if (locationExperience > 5) score += 15;
+    else if (locationExperience > 0) score += 8;
+    
+    // 5. Shift type preference (if available)
+    // TODO: Implement user preferences for PAGI/SIANG/MALAM
+    
+    // 6. Consecutive days check (fatigue prevention)
+    const consecutiveDays = this.calculateConsecutiveDays(user, request.date);
+    if (consecutiveDays >= 5) score -= 35; // Severe penalty
+    else if (consecutiveDays >= 3) score -= 20; // Moderate penalty
+    else if (consecutiveDays >= 2) score -= 10; // Light penalty
+    
+    // 7. Availability check (absolute requirement)
+    const hasConflict = this.checkDateConflict(user, request.date);
+    if (hasConflict) score = 0; // Completely unavailable
+    
+    // 8. Seniority bonus (if available)
+    if (user.tanggalBergabung) {
+      const yearsOfService = (Date.now() - new Date(user.tanggalBergabung).getTime()) / (365 * 24 * 60 * 60 * 1000);
+      if (yearsOfService > 5) score += 8;
+      else if (yearsOfService > 2) score += 5;
+    }
     
     return Math.max(0, Math.min(100, score));
   }
@@ -640,9 +914,172 @@ export class AdminShiftOptimizationService {
     });
   }
 
+  /**
+   * 🔥 NEW: Get total shift count for a user in a specific period
+   */
+  private async getTotalShift(pegawaiId: number, startDate?: Date, endDate?: Date): Promise<number> {
+    const start = startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // Default: last 30 days
+    const end = endDate || new Date(); // Default: today
+
+    const shiftCount = await this.prisma.shift.count({
+      where: {
+        userId: pegawaiId,
+        tanggal: {
+          gte: start,
+          lte: end
+        }
+      }
+    });
+
+    return shiftCount;
+  }
+
+  /**
+   * 🔥 NEW: Workload Balancing - Sort users by shift count (ascending)
+   */
+  private async sortUsersByWorkload(users: any[], startDate?: Date, endDate?: Date): Promise<any[]> {
+    console.log('🎯 Workload Balancing: Sorting users by shift count...');
+    
+    // Calculate total shifts for each user
+    const usersWithShiftCount = await Promise.all(
+      users.map(async (user) => {
+        const totalShifts = await this.getTotalShift(user.id, startDate, endDate);
+        return {
+          ...user,
+          totalShifts,
+          workloadScore: this.calculateWorkloadScore(user, totalShifts)
+        };
+      })
+    );
+
+    // Sort by total shifts (ascending) - prioritize users with fewer shifts
+    const sortedUsers = usersWithShiftCount.sort((a, b) => {
+      // Primary sort: total shifts (fewer shifts = higher priority)
+      if (a.totalShifts !== b.totalShifts) {
+        return a.totalShifts - b.totalShifts;
+      }
+      
+      // Secondary sort: workload score (higher score = better candidate)
+      return b.workloadScore - a.workloadScore;
+    });
+
+    console.log('📊 Workload Distribution:');
+    sortedUsers.slice(0, 10).forEach((user, index) => {
+      console.log(`   ${index + 1}. ${user.namaDepan} ${user.namaBelakang}: ${user.totalShifts} shifts (score: ${user.workloadScore})`);
+    });
+
+    return sortedUsers;
+  }
+
+  /**
+   * 🔥 NEW: Calculate workload fairness score
+   */
+  private calculateWorkloadScore(user: any, totalShifts: number): number {
+    let score = 100; // Base score
+    
+    // Penalty for high workload
+    const maxShiftsPerMonth = this.getMaxShiftsForRole(user.role);
+    const utilizationRate = (totalShifts / maxShiftsPerMonth) * 100;
+    
+    if (utilizationRate > 90) score -= 30; // Heavy penalty for overworked
+    else if (utilizationRate > 70) score -= 15; // Medium penalty
+    else if (utilizationRate < 30) score += 20; // Bonus for underutilized
+    
+    // Bonus for seniority (if available)
+    if (user.tanggalBergabung) {
+      const yearsOfService = (Date.now() - new Date(user.tanggalBergabung).getTime()) / (365 * 24 * 60 * 60 * 1000);
+      if (yearsOfService > 5) score += 10;
+      else if (yearsOfService > 2) score += 5;
+    }
+
+    return Math.round(score);
+  }
+
+  /**
+   * 🔥 NEW: Get max shifts allowed per role
+   */
+  private getMaxShiftsForRole(role: string): number {
+    const roleMaxShifts = {
+      'DOKTER': 18,      // Doctors: fewer shifts due to higher responsibility
+      'PERAWAT': 20,     // Nurses: standard shifts
+      'STAF': 22,        // Staff: slightly more shifts possible
+      'SUPERVISOR': 16   // Supervisors: fewer due to administrative duties
+    };
+
+    return roleMaxShifts[role] || 20; // Default to 20 shifts per month
+  }
+
   private calculateConsecutiveDays(user: any, targetDate: string): number {
-    // Implementation for consecutive days calculation
-    return 0; // Simplified for now
+    // 🔥 ENHANCED: Calculate consecutive days including night shift limitations
+    if (!user.shifts || user.shifts.length === 0) return 0;
+    
+    const targetDateObj = new Date(targetDate);
+    const recentShifts = user.shifts
+      .map((shift: any) => ({
+        date: new Date(shift.tanggal),
+        shiftType: shift.tipeShift
+      }))
+      .sort((a, b) => a.date.getTime() - b.date.getTime());
+    
+    // Count consecutive days ending with target date
+    let consecutiveDays = 0;
+    let consecutiveNightShifts = 0;
+    
+    // Check backwards from target date
+    for (let i = 0; i < 7; i++) { // Check last 7 days
+      const checkDate = new Date(targetDateObj);
+      checkDate.setDate(checkDate.getDate() - i - 1);
+      
+      const shiftOnDate = recentShifts.find(shift => 
+        shift.date.toDateString() === checkDate.toDateString()
+      );
+      
+      if (shiftOnDate) {
+        consecutiveDays++;
+        
+        // 🔥 NEW: Track consecutive night shifts
+        if (shiftOnDate.shiftType === 'MALAM') {
+          consecutiveNightShifts++;
+        } else {
+          // Reset night shift counter if non-night shift found
+          if (consecutiveNightShifts > 0) break;
+        }
+      } else {
+        break; // No shift found, break consecutive streak
+      }
+    }
+    
+    // Store night shift count for validation
+    user._consecutiveNightShifts = consecutiveNightShifts;
+    
+    return consecutiveDays;
+  }
+
+  /**
+   * 🔥 NEW: Validate night shift limitations
+   */
+  private validateNightShiftLimits(user: any, request: ShiftCreationRequest): { 
+    isValid: boolean; 
+    reason?: string; 
+  } {
+    const MAX_CONSECUTIVE_NIGHT_SHIFTS = 2; // Maximum 2 consecutive night shifts
+    
+    if (request.shiftType !== 'MALAM') {
+      return { isValid: true }; // Not a night shift, no restriction
+    }
+    
+    // Calculate current consecutive night shifts
+    this.calculateConsecutiveDays(user, request.date);
+    const consecutiveNightShifts = user._consecutiveNightShifts || 0;
+    
+    if (consecutiveNightShifts >= MAX_CONSECUTIVE_NIGHT_SHIFTS) {
+      return {
+        isValid: false,
+        reason: `Maximum ${MAX_CONSECUTIVE_NIGHT_SHIFTS} consecutive night shifts exceeded (current: ${consecutiveNightShifts})`
+      };
+    }
+    
+    return { isValid: true };
   }
 
   private checkDateConflict(user: any, targetDate: string): boolean {
@@ -2795,6 +3232,7 @@ export class AdminShiftOptimizationService {
             lokasishift: assignment.location,
             userId: assignment.userId,
             lokasiEnum: assignment.location as any,
+            tipeshift: assignment.shiftType,
             tipeEnum: assignment.shiftType as any
           }
         });
@@ -3075,5 +3513,266 @@ export class AdminShiftOptimizationService {
     }
     
     return Math.max(maxConsecutive, currentConsecutive);
+  }
+
+  /**
+   * 🔥 NEW: Reset/Delete automatically generated shifts
+   */
+  async resetAutoGeneratedShifts(
+    startDate: string, 
+    endDate: string, 
+    source?: string
+  ): Promise<{
+    success: boolean;
+    deletedShifts: number;
+    summary: {
+      dateRange: string;
+      affectedUsers: number;
+      deletedBySource: { [source: string]: number };
+    };
+    message: string;
+  }> {
+    console.log(`🗑️ Resetting auto-generated shifts from ${startDate} to ${endDate}`);
+    
+    try {
+      // Build where condition
+      const whereCondition: any = {
+        tanggal: {
+          gte: new Date(startDate),
+          lte: new Date(endDate + 'T23:59:59.999Z')
+        },
+        OR: [
+          { createdBy: 'SYSTEM_AUTO_SCHEDULE' },
+          { createdBy: 'BULK_WEEKLY' },
+          { createdBy: 'BULK_MONTHLY' },
+          { notes: { contains: 'Auto-generated' } }
+        ]
+      };
+      
+      // If specific source provided, filter by it
+      if (source) {
+        whereCondition.createdBy = source;
+      }
+      
+      // Get shifts to be deleted for statistics
+      const shiftsToDelete = await this.prisma.shift.findMany({
+        where: whereCondition,
+        include: {
+          user: {
+            select: {
+              id: true,
+              namaDepan: true,
+              namaBelakang: true
+            }
+          }
+        }
+      });
+      
+      // Calculate statistics
+      const affectedUsers = new Set(shiftsToDelete.map(shift => shift.userId)).size;
+      const deletedBySource: { [source: string]: number } = {};
+      
+      shiftsToDelete.forEach(shift => {
+        // Fixed: Use notes field to identify auto-generated shifts since createdBy field doesn't exist
+        const shiftSource = shift.notes?.includes('Auto-generated') ? 'SYSTEM_AUTO_SCHEDULE' : 'MANUAL';
+        deletedBySource[shiftSource] = (deletedBySource[shiftSource] || 0) + 1;
+      });
+      
+      // Delete the shifts
+      const deleteResult = await this.prisma.shift.deleteMany({
+        where: whereCondition
+      });
+      
+      console.log(`✅ Deleted ${deleteResult.count} auto-generated shifts`);
+      
+      return {
+        success: true,
+        deletedShifts: deleteResult.count,
+        summary: {
+          dateRange: `${startDate} to ${endDate}`,
+          affectedUsers,
+          deletedBySource
+        },
+        message: `Successfully deleted ${deleteResult.count} auto-generated shifts affecting ${affectedUsers} users`
+      };
+      
+    } catch (error) {
+      console.error('❌ Error resetting auto-generated shifts:', error);
+      throw new Error(`Failed to reset auto-generated shifts: ${error.message}`);
+    }
+  }
+
+  /**
+   * 🔥 NEW: Preview shifts that would be deleted in reset operation
+   */
+  async previewResetAutoGeneratedShifts(
+    startDate: string, 
+    endDate: string, 
+    source?: string
+  ): Promise<{
+    shiftsToDelete: any[];
+    summary: {
+      totalShifts: number;
+      affectedUsers: number;
+      shiftsBySource: { [source: string]: number };
+      shiftsByLocation: { [location: string]: number };
+      shiftsByType: { [type: string]: number };
+    };
+  }> {
+    console.log(`👁️ Previewing auto-generated shifts to delete from ${startDate} to ${endDate}`);
+    
+    try {
+      // Build where condition
+      const whereCondition: any = {
+        tanggal: {
+          gte: new Date(startDate),
+          lte: new Date(endDate + 'T23:59:59.999Z')
+        },
+        OR: [
+          { createdBy: 'SYSTEM_AUTO_SCHEDULE' },
+          { createdBy: 'BULK_WEEKLY' },
+          { createdBy: 'BULK_MONTHLY' },
+          { notes: { contains: 'Auto-generated' } }
+        ]
+      };
+      
+      // If specific source provided, filter by it
+      if (source) {
+        whereCondition.createdBy = source;
+      }
+      
+      // Get shifts that would be deleted
+      const shiftsToDelete = await this.prisma.shift.findMany({
+        where: whereCondition,
+        include: {
+          user: {
+            select: {
+              id: true,
+              namaDepan: true,
+              namaBelakang: true,
+              role: true
+            }
+          }
+        },
+        orderBy: [
+          { tanggal: 'asc' },
+          { jammulai: 'asc' }
+        ]
+      });
+      
+      // Calculate statistics
+      const affectedUsers = new Set(shiftsToDelete.map(shift => shift.userId)).size;
+      const shiftsBySource: { [source: string]: number } = {};
+      const shiftsByLocation: { [location: string]: number } = {};
+      const shiftsByType: { [type: string]: number } = {};
+      
+      shiftsToDelete.forEach(shift => {
+        // Determine source from notes if createdBy doesn't exist
+        let shiftSource = 'UNKNOWN';
+        if (shift.notes) {
+          if (shift.notes.includes('Auto-generated')) shiftSource = 'AUTO_GENERATED';
+          else if (shift.notes.includes('SYSTEM_AUTO_SCHEDULE')) shiftSource = 'SYSTEM_AUTO_SCHEDULE';
+          else if (shift.notes.includes('BULK_WEEKLY')) shiftSource = 'BULK_WEEKLY';
+          else if (shift.notes.includes('BULK_MONTHLY')) shiftSource = 'BULK_MONTHLY';
+        }
+        
+        const location = shift.lokasiEnum || 'UNKNOWN';
+        const type = shift.tipeshift || 'UNKNOWN';
+        
+        shiftsBySource[shiftSource] = (shiftsBySource[shiftSource] || 0) + 1;
+        shiftsByLocation[location] = (shiftsByLocation[location] || 0) + 1;
+        shiftsByType[type] = (shiftsByType[type] || 0) + 1;
+      });
+      
+      // Format shifts for preview
+      const formattedShifts = shiftsToDelete.map(shift => {
+        // Determine source from notes if createdBy doesn't exist
+        let shiftSource = 'UNKNOWN';
+        if (shift.notes) {
+          if (shift.notes.includes('Auto-generated')) shiftSource = 'AUTO_GENERATED';
+          else if (shift.notes.includes('SYSTEM_AUTO_SCHEDULE')) shiftSource = 'SYSTEM_AUTO_SCHEDULE';
+          else if (shift.notes.includes('BULK_WEEKLY')) shiftSource = 'BULK_WEEKLY';
+          else if (shift.notes.includes('BULK_MONTHLY')) shiftSource = 'BULK_MONTHLY';
+        }
+        
+        return {
+          id: shift.id,
+          date: shift.tanggal.toISOString().split('T')[0],
+          startTime: shift.jammulai.toTimeString().substring(0, 5),
+          endTime: shift.jamselesai.toTimeString().substring(0, 5),
+          location: shift.lokasiEnum,
+          shiftType: shift.tipeshift,
+          user: {
+            id: shift.user.id,
+            name: `${shift.user.namaDepan} ${shift.user.namaBelakang}`,
+            role: shift.user.role
+          },
+          source: shiftSource,
+          notes: shift.notes
+        };
+      });
+      
+      return {
+        shiftsToDelete: formattedShifts,
+        summary: {
+          totalShifts: shiftsToDelete.length,
+          affectedUsers,
+          shiftsBySource,
+          shiftsByLocation,
+          shiftsByType
+        }
+      };
+      
+    } catch (error) {
+      console.error('❌ Error previewing auto-generated shifts:', error);
+      throw new Error(`Failed to preview auto-generated shifts: ${error.message}`);
+    }
+  }
+
+  /**
+   * Helper methods for shift time calculation
+   */
+  private getShiftStartTime(shiftType: string): Date {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    switch (shiftType) {
+      case 'PAGI':
+        today.setHours(7, 0, 0, 0); // 07:00
+        break;
+      case 'SIANG':
+        today.setHours(14, 0, 0, 0); // 14:00
+        break;
+      case 'MALAM':
+        today.setHours(21, 0, 0, 0); // 21:00
+        break;
+      default:
+        today.setHours(8, 0, 0, 0); // Default 08:00
+    }
+    
+    return today;
+  }
+
+  private getShiftEndTime(shiftType: string): Date {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    switch (shiftType) {
+      case 'PAGI':
+        today.setHours(14, 0, 0, 0); // 07:00 - 14:00 (7 hours)
+        break;
+      case 'SIANG':
+        today.setHours(21, 0, 0, 0); // 14:00 - 21:00 (7 hours)
+        break;
+      case 'MALAM':
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(7, 0, 0, 0); // 21:00 - 07:00 next day (10 hours)
+        return tomorrow;
+      default:
+        today.setHours(17, 0, 0, 0); // Default 8 hours
+    }
+    
+    return today;
   }
 }

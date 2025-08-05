@@ -806,10 +806,26 @@ const ManagemenJadwalPage = () => {
     const [bulkScheduleError, setBulkScheduleError] = useState<string | null>(null);
     const [bulkScheduleResult, setBulkScheduleResult] = useState<BulkScheduleResult | null>(null);
     
+    // 🔥 NEW: Bulk Preview States
+    const [showBulkPreview, setShowBulkPreview] = useState(false);
+    const [bulkPreviewData, setBulkPreviewData] = useState<any>(null);
+    const [isLoadingBulkPreview, setIsLoadingBulkPreview] = useState(false);
+    
     // Delete All Shifts States
     const [isDeleteAllModalOpen, setIsDeleteAllModalOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [deleteError, setDeleteError] = useState<string | null>(null);
+
+    // 🔥 NEW FEATURES: Preview, Workload Balancing, Reset States
+    const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+    const [isWorkloadModalOpen, setIsWorkloadModalOpen] = useState(false);
+    const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+    const [previewData, setPreviewData] = useState<any>(null);
+    const [workloadData, setWorkloadData] = useState<any>(null);
+    const [resetData, setResetData] = useState<any>(null);
+    const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+    const [isLoadingWorkload, setIsLoadingWorkload] = useState(false);
+    const [isResetting, setIsResetting] = useState(false);
     
     // Debug: Monitor modal state changes
     useEffect(() => {
@@ -1162,11 +1178,83 @@ const ManagemenJadwalPage = () => {
 
     // Bulk Scheduling Functions
     const handleCreateWeeklySchedule = async () => {
+        // 🔥 NEW: Show preview first instead of directly creating
+        await handlePreviewWeeklySchedule();
+    };
+
+    // 🔥 NEW: Preview weekly schedule before creation
+    const handlePreviewWeeklySchedule = async () => {
+        setIsLoadingBulkPreview(true);
+        setBulkScheduleError(null);
+        
+        try {
+            console.log('�️ Previewing weekly schedule:', JSON.stringify(weeklyRequest, null, 2));
+            
+            const token = localStorage.getItem('token');
+            if (!token) {
+                throw new Error('Token tidak ditemukan');
+            }
+
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+            
+            // Convert weekly request to preview format
+            const previewRequests = generateWeeklyPreviewRequests(weeklyRequest);
+            
+            const response = await fetch(`${apiUrl}/admin/shift-optimization/preview-optimal-shifts`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(previewRequests),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'Gagal memuat preview jadwal mingguan');
+            }
+
+            const previewResult = await response.json();
+            setBulkPreviewData({
+                type: 'weekly',
+                data: previewResult,
+                originalRequest: weeklyRequest
+            });
+            setShowBulkPreview(true);
+            
+        } catch (error: any) {
+            console.error('Preview weekly error:', error);
+            setBulkScheduleError(error.message);
+        } finally {
+            setIsLoadingBulkPreview(false);
+        }
+    };
+
+    // 🔥 NEW: Confirm and create weekly schedule after preview approval
+    const handleConfirmWeeklySchedule = async () => {
         setIsBulkScheduling(true);
         setBulkScheduleError(null);
         
         try {
-            console.log('🚀 Sending weekly request:', JSON.stringify(weeklyRequest, null, 2));
+            console.log('✅ Confirming weekly schedule creation...');
+            
+            const token = localStorage.getItem('token');
+            if (!token) {
+                throw new Error('Token tidak ditemukan');
+            }
+
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+            const response = await fetch(`${apiUrl}/admin/shift-optimization/create-weekly-schedule`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(weeklyRequest),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
             
             const token = localStorage.getItem('token');
             if (!token) {
@@ -1284,8 +1372,9 @@ const ManagemenJadwalPage = () => {
             
             // Set pending refresh instead of immediate reload
             setPendingRefresh(true);
-        } catch (error: any) {
-            setBulkScheduleError(error.message);
+        } catch (error: unknown) {
+            const errorMsg = error instanceof Error ? error.message : 'Terjadi kesalahan';
+            setBulkScheduleError(errorMsg);
             
             const errorMessage = error instanceof Error ? error.message : 'Terjadi kesalahan saat membuat jadwal mingguan';
             
@@ -1343,6 +1432,46 @@ const ManagemenJadwalPage = () => {
         } finally {
             setIsBulkScheduling(false);
         }
+    };
+
+    // 🔥 NEW: Helper function to generate preview requests from weekly request
+    const generateWeeklyPreviewRequests = (weeklyReq: WeeklyScheduleRequest) => {
+        const requests: any[] = [];
+        const startDate = new Date(weeklyReq.startDate);
+        
+        // Generate requests for 7 days
+        for (let day = 0; day < 7; day++) {
+            const currentDate = new Date(startDate);
+            currentDate.setDate(startDate.getDate() + day);
+            const dateString = currentDate.toISOString().split('T')[0];
+            
+            // For each selected location
+            weeklyReq.locations.forEach(location => {
+                const locationPattern = weeklyReq.staffPattern?.[location];
+                if (locationPattern) {
+                    // For each shift type in the pattern
+                    Object.entries(locationPattern).forEach(([shiftType, roles]) => {
+                        const totalStaff = Object.values(roles as Record<string, any>)
+                            .reduce((sum, count) => sum + (Number(count) || 0), 0);
+                        
+                        if (totalStaff > 0) {
+                            requests.push({
+                                date: dateString,
+                                location,
+                                shiftType,
+                                requiredCount: totalStaff,
+                                priority: weeklyReq.priority || 'NORMAL',
+                                preferredRoles: Object.entries(roles as Record<string, any>)
+                                    .filter(([_, count]) => Number(count) > 0)
+                                    .map(([role, _]) => role.toUpperCase())
+                            });
+                        }
+                    });
+                }
+            });
+        }
+        
+        return requests;
     };
 
     const handleCreateMonthlySchedule = async () => {
@@ -1556,6 +1685,192 @@ const ManagemenJadwalPage = () => {
             });
         } finally {
             setIsBulkScheduling(false);
+        }
+    };
+
+    // 🔥 NEW FEATURE 1: Preview Optimal Shifts (without saving to database)
+    const handlePreviewOptimalShifts = async () => {
+        setIsLoadingPreview(true);
+        setPreviewData(null);
+        
+        try {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                throw new Error('Token tidak ditemukan');
+            }
+
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+            const response = await fetch(`${apiUrl}/admin/shift-optimization/preview-optimal-shifts`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    date: new Date().toISOString().split('T')[0],
+                    locations: ['ICU', 'RAWAT_INAP', 'GAWAT_DARURAT'],
+                    workloadLimits: {
+                        maxShiftsPerPerson: 20,
+                        maxConsecutiveDays: 5
+                    }
+                }),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'Gagal memuat preview jadwal');
+            }
+
+            const result = await response.json();
+            setPreviewData(result);
+            setIsPreviewModalOpen(true);
+            
+            showNotificationModal({
+                type: 'info',
+                title: 'Preview Jadwal Optimal',
+                message: `Menampilkan ${result.assignments?.length || 0} assignment yang akan dibuat`,
+                details: {
+                    workloadDistribution: result.workloadAnalysis,
+                    fairnessScore: result.fairnessScore,
+                    conflictsDetected: result.conflicts?.length || 0
+                }
+            });
+        } catch (error: any) {
+            console.error('Preview error:', error);
+            showNotificationModal({
+                type: 'error',
+                title: 'Gagal Memuat Preview',
+                message: error.message,
+                details: {
+                    timestamp: new Date().toLocaleString('id-ID'),
+                    recommendations: [
+                        'Periksa koneksi internet',
+                        'Pastikan server backend berjalan',
+                        'Coba refresh halaman dan ulangi'
+                    ]
+                }
+            });
+        } finally {
+            setIsLoadingPreview(false);
+        }
+    };
+
+    // 🔥 NEW FEATURE 2: Workload Balancing Analysis
+    const handleAnalyzeWorkload = async () => {
+        setIsLoadingWorkload(true);
+        setWorkloadData(null);
+        
+        try {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                throw new Error('Token tidak ditemukan');
+            }
+
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+            const response = await fetch(`${apiUrl}/admin/shift-optimization/analyze-workload`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                },
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'Gagal menganalisis beban kerja');
+            }
+
+            const result = await response.json();
+            setWorkloadData(result);
+            setIsWorkloadModalOpen(true);
+            
+            showNotificationModal({
+                type: 'success',
+                title: 'Analisis Beban Kerja Selesai',
+                message: `${result.totalUsers} pegawai dianalisis`,
+                details: {
+                    overworkedUsers: result.overworkedUsers?.length || 0,
+                    underworkedUsers: result.underworkedUsers?.length || 0,
+                    averageShifts: result.averageShiftsPerUser || 0,
+                    fairnessScore: result.fairnessScore || 0
+                }
+            });
+        } catch (error: any) {
+            console.error('Workload analysis error:', error);
+            showNotificationModal({
+                type: 'error',
+                title: 'Gagal Menganalisis Beban Kerja',
+                message: error.message,
+                details: {
+                    timestamp: new Date().toLocaleString('id-ID'),
+                    recommendations: [
+                        'Pastikan ada data shift di sistem',
+                        'Periksa koneksi ke server',
+                        'Hubungi administrator jika masalah berlanjut'
+                    ]
+                }
+            });
+        } finally {
+            setIsLoadingWorkload(false);
+        }
+    };
+
+    // 🔥 NEW FEATURE 3: Reset Auto-Generated Shifts
+    const handleResetAutoShifts = async () => {
+        setIsResetting(true);
+        setResetData(null);
+        
+        try {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                throw new Error('Token tidak ditemukan');
+            }
+
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+            const response = await fetch(`${apiUrl}/admin/shift-optimization/reset-auto-shifts`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                },
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'Gagal mereset jadwal otomatis');
+            }
+
+            const result = await response.json();
+            setResetData(result);
+            
+            // Refresh the shifts data
+            await fetchJadwalData();
+            
+            showNotificationModal({
+                type: 'success',
+                title: 'Reset Jadwal Otomatis Berhasil',
+                message: `${result.deletedShifts} shift otomatis telah dihapus`,
+                details: {
+                    affectedUsers: result.affectedUsers,
+                    deletedBySource: result.deletedBySource,
+                    performanceMetrics: result.metrics
+                }
+            });
+        } catch (error: any) {
+            console.error('Reset auto shifts error:', error);
+            showNotificationModal({
+                type: 'error',
+                title: 'Gagal Reset Jadwal Otomatis',
+                message: error.message,
+                details: {
+                    timestamp: new Date().toLocaleString('id-ID'),
+                    recommendations: [
+                        'Pastikan ada jadwal otomatis yang bisa dihapus',
+                        'Periksa permissions admin',
+                        'Coba reset dengan filter tanggal spesifik'
+                    ]
+                }
+            });
+        } finally {
+            setIsResetting(false);
         }
     };
 
@@ -2632,6 +2947,64 @@ const ManagemenJadwalPage = () => {
                     >
                         <Trash2 className="w-4 h-4" />
                         Hapus Semua Shift
+                    </button>
+
+                    {/* 🔥 NEW FEATURES BUTTONS */}
+                    <button 
+                        className="flex items-center gap-2 px-6 py-3 rounded-lg bg-gradient-to-r from-indigo-500 to-purple-600 text-white hover:from-indigo-600 hover:to-purple-700 transition-all shadow-md text-sm font-medium"
+                        onClick={handlePreviewOptimalShifts}
+                        disabled={isLoadingPreview}
+                        title="Preview jadwal optimal tanpa menyimpan ke database"
+                    >
+                        {isLoadingPreview ? (
+                            <>
+                                <Loader2 className="animate-spin w-4 h-4" />
+                                Loading...
+                            </>
+                        ) : (
+                            <>
+                                <Eye className="w-4 h-4" />
+                                Preview Optimal
+                            </>
+                        )}
+                    </button>
+
+                    <button 
+                        className="flex items-center gap-2 px-6 py-3 rounded-lg bg-gradient-to-r from-teal-500 to-cyan-600 text-white hover:from-teal-600 hover:to-cyan-700 transition-all shadow-md text-sm font-medium"
+                        onClick={handleAnalyzeWorkload}
+                        disabled={isLoadingWorkload}
+                        title="Analisis distribusi beban kerja pegawai"
+                    >
+                        {isLoadingWorkload ? (
+                            <>
+                                <Loader2 className="animate-spin w-4 h-4" />
+                                Analyzing...
+                            </>
+                        ) : (
+                            <>
+                                <BarChart3 className="w-4 h-4" />
+                                Workload Balance
+                            </>
+                        )}
+                    </button>
+
+                    <button 
+                        className="flex items-center gap-2 px-6 py-3 rounded-lg bg-gradient-to-r from-rose-500 to-pink-600 text-white hover:from-rose-600 hover:to-pink-700 transition-all shadow-md text-sm font-medium"
+                        onClick={() => setIsResetModalOpen(true)}
+                        disabled={isResetting}
+                        title="Reset/hapus semua shift yang dibuat otomatis"
+                    >
+                        {isResetting ? (
+                            <>
+                                <Loader2 className="animate-spin w-4 h-4" />
+                                Resetting...
+                            </>
+                        ) : (
+                            <>
+                                <RefreshCw className="w-4 h-4" />
+                                Reset Auto Shifts
+                            </>
+                        )}
                     </button>
                 </div>
             )}
@@ -3895,6 +4268,367 @@ const ManagemenJadwalPage = () => {
                                     }`}
                                 >
                                     {confirmationData.confirmText}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 🔥 NEW MODAL 1: Preview Optimal Shifts */}
+            {isPreviewModalOpen && previewData && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="p-6">
+                            <div className="flex items-center justify-between mb-6">
+                                <div className="flex items-center gap-3">
+                                    <Eye className="w-6 h-6 text-indigo-600" />
+                                    <h2 className="text-xl font-semibold">Preview Jadwal Optimal</h2>
+                                </div>
+                                <button
+                                    onClick={() => setIsPreviewModalOpen(false)}
+                                    className="text-gray-400 hover:text-gray-600"
+                                >
+                                    <X className="w-6 h-6" />
+                                </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                                <div className="bg-blue-50 p-4 rounded-lg">
+                                    <div className="text-2xl font-bold text-blue-600">{previewData.assignments?.length || 0}</div>
+                                    <div className="text-sm text-gray-600">Total Assignments</div>
+                                </div>
+                                <div className="bg-green-50 p-4 rounded-lg">
+                                    <div className="text-2xl font-bold text-green-600">{previewData.fairnessScore || 0}%</div>
+                                    <div className="text-sm text-gray-600">Fairness Score</div>
+                                </div>
+                                <div className="bg-orange-50 p-4 rounded-lg">
+                                    <div className="text-2xl font-bold text-orange-600">{previewData.conflicts?.length || 0}</div>
+                                    <div className="text-sm text-gray-600">Conflicts Detected</div>
+                                </div>
+                            </div>
+
+                            {previewData.assignments && previewData.assignments.length > 0 && (
+                                <div className="mb-6">
+                                    <h3 className="text-lg font-semibold mb-3">Assignments to be Created</h3>
+                                    <div className="max-h-60 overflow-y-auto">
+                                        <table className="min-w-full bg-white border border-gray-200">
+                                            <thead className="bg-gray-50">
+                                                <tr>
+                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Employee</th>
+                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Location</th>
+                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Shift</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-200">
+                                                {previewData.assignments.map((assignment: any, index: number) => (
+                                                    <tr key={index}>
+                                                        <td className="px-4 py-2 text-sm text-gray-900">{assignment.employeeName}</td>
+                                                        <td className="px-4 py-2 text-sm text-gray-900">{assignment.date}</td>
+                                                        <td className="px-4 py-2 text-sm text-gray-900">{assignment.location}</td>
+                                                        <td className="px-4 py-2 text-sm text-gray-900">{assignment.shiftType}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="flex justify-end gap-3">
+                                <button
+                                    onClick={() => setIsPreviewModalOpen(false)}
+                                    className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
+                                >
+                                    Close
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 🔥 NEW MODAL 2: Workload Analysis */}
+            {isWorkloadModalOpen && workloadData && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="p-6">
+                            <div className="flex items-center justify-between mb-6">
+                                <div className="flex items-center gap-3">
+                                    <BarChart3 className="w-6 h-6 text-teal-600" />
+                                    <h2 className="text-xl font-semibold">Analisis Beban Kerja</h2>
+                                </div>
+                                <button
+                                    onClick={() => setIsWorkloadModalOpen(false)}
+                                    className="text-gray-400 hover:text-gray-600"
+                                >
+                                    <X className="w-6 h-6" />
+                                </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                                <div className="bg-blue-50 p-4 rounded-lg">
+                                    <div className="text-2xl font-bold text-blue-600">{workloadData.totalUsers || 0}</div>
+                                    <div className="text-sm text-gray-600">Total Employees</div>
+                                </div>
+                                <div className="bg-red-50 p-4 rounded-lg">
+                                    <div className="text-2xl font-bold text-red-600">{workloadData.overworkedUsers?.length || 0}</div>
+                                    <div className="text-sm text-gray-600">Overworked</div>
+                                </div>
+                                <div className="bg-yellow-50 p-4 rounded-lg">
+                                    <div className="text-2xl font-bold text-yellow-600">{workloadData.underworkedUsers?.length || 0}</div>
+                                    <div className="text-sm text-gray-600">Underworked</div>
+                                </div>
+                                <div className="bg-green-50 p-4 rounded-lg">
+                                    <div className="text-2xl font-bold text-green-600">{workloadData.fairnessScore || 0}%</div>
+                                    <div className="text-sm text-gray-600">Fairness Score</div>
+                                </div>
+                            </div>
+
+                            {workloadData.userWorkloads && workloadData.userWorkloads.length > 0 && (
+                                <div className="mb-6">
+                                    <h3 className="text-lg font-semibold mb-3">Distribusi Beban Kerja per Pegawai</h3>
+                                    <div className="max-h-60 overflow-y-auto">
+                                        <table className="min-w-full bg-white border border-gray-200">
+                                            <thead className="bg-gray-50">
+                                                <tr>
+                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Employee</th>
+                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Shifts</th>
+                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-200">
+                                                {workloadData.userWorkloads.map((user: any, index: number) => (
+                                                    <tr key={index}>
+                                                        <td className="px-4 py-2 text-sm text-gray-900">{user.employeeName}</td>
+                                                        <td className="px-4 py-2 text-sm text-gray-900">{user.totalShifts}</td>
+                                                        <td className="px-4 py-2 text-sm">
+                                                            <span className={`px-2 py-1 rounded-full text-xs ${
+                                                                user.status === 'OVERWORKED' ? 'bg-red-100 text-red-800' :
+                                                                user.status === 'UNDERWORKED' ? 'bg-yellow-100 text-yellow-800' :
+                                                                'bg-green-100 text-green-800'
+                                                            }`}>
+                                                                {user.status}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-4 py-2 text-sm text-gray-900">{user.workloadScore}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="flex justify-end gap-3">
+                                <button
+                                    onClick={() => setIsWorkloadModalOpen(false)}
+                                    className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
+                                >
+                                    Close
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 🔥 NEW MODAL 3: Reset Confirmation */}
+            {isResetModalOpen && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-lg max-w-lg w-full">
+                        <div className="p-6">
+                            <div className="flex items-center gap-3 mb-4">
+                                <Shield className="w-6 h-6 text-rose-600" />
+                                <h2 className="text-xl font-semibold">Konfirmasi Reset Auto Shifts</h2>
+                            </div>
+                            
+                            <div className="bg-rose-50 border-l-4 border-rose-400 p-4 mb-6">
+                                <div className="flex">
+                                    <AlertTriangle className="h-5 w-5 text-rose-400 mr-2" />
+                                    <div>
+                                        <p className="text-sm text-rose-700">
+                                            <strong>PERINGATAN:</strong> Aksi ini akan menghapus semua shift yang dibuat secara otomatis oleh sistem. 
+                                            Shift yang dibuat manual tidak akan terpengaruh.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <p className="text-gray-600 mb-6">
+                                Apakah Anda yakin ingin melanjutkan? Aksi ini tidak dapat dibatalkan.
+                            </p>
+
+                            <div className="flex justify-end gap-3">
+                                <button
+                                    onClick={() => setIsResetModalOpen(false)}
+                                    className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setIsResetModalOpen(false);
+                                        handleResetAutoShifts();
+                                    }}
+                                    className="px-4 py-2 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors"
+                                >
+                                    Ya, Reset Sekarang
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 🔥 NEW MODAL 4: Bulk Schedule Preview */}
+            {showBulkPreview && bulkPreviewData && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-lg max-w-7xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="p-6">
+                            <div className="flex items-center justify-between mb-6">
+                                <div className="flex items-center gap-3">
+                                    <Calendar className="w-6 h-6 text-blue-600" />
+                                    <h2 className="text-xl font-semibold">
+                                        Preview Jadwal {bulkPreviewData.type === 'weekly' ? 'Mingguan' : 'Bulanan'}
+                                    </h2>
+                                </div>
+                                <button
+                                    onClick={() => setShowBulkPreview(false)}
+                                    className="text-gray-400 hover:text-gray-600"
+                                >
+                                    <X className="w-6 h-6" />
+                                </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                                <div className="bg-blue-50 p-4 rounded-lg">
+                                    <div className="text-2xl font-bold text-blue-600">
+                                        {bulkPreviewData.data.statistics?.totalRequested || 0}
+                                    </div>
+                                    <div className="text-sm text-gray-600">Total Diminta</div>
+                                </div>
+                                <div className="bg-green-50 p-4 rounded-lg">
+                                    <div className="text-2xl font-bold text-green-600">
+                                        {bulkPreviewData.data.statistics?.totalAssigned || 0}
+                                    </div>
+                                    <div className="text-sm text-gray-600">Berhasil Diassign</div>
+                                </div>
+                                <div className="bg-purple-50 p-4 rounded-lg">
+                                    <div className="text-2xl font-bold text-purple-600">
+                                        {bulkPreviewData.data.statistics?.fulfillmentRate?.toFixed(1) || 0}%
+                                    </div>
+                                    <div className="text-sm text-gray-600">Tingkat Pemenuhan</div>
+                                </div>
+                                <div className="bg-orange-50 p-4 rounded-lg">
+                                    <div className="text-2xl font-bold text-orange-600">
+                                        {bulkPreviewData.data.statistics?.conflicts?.length || 0}
+                                    </div>
+                                    <div className="text-sm text-gray-600">Konflik Terdeteksi</div>
+                                </div>
+                            </div>
+
+                            {/* Schedule Preview Table */}
+                            {bulkPreviewData.data.preview && bulkPreviewData.data.preview.length > 0 && (
+                                <div className="mb-6">
+                                    <h3 className="text-lg font-semibold mb-3">Preview Jadwal yang Akan Dibuat</h3>
+                                    <div className="max-h-80 overflow-y-auto border border-gray-200 rounded-lg">
+                                        <table className="min-w-full bg-white">
+                                            <thead className="bg-gray-50 sticky top-0">
+                                                <tr>
+                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tanggal</th>
+                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pegawai</th>
+                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lokasi</th>
+                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Shift</th>
+                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-200">
+                                                {bulkPreviewData.data.preview.map((assignment: any, index: number) => (
+                                                    <tr key={index} className="hover:bg-gray-50">
+                                                        <td className="px-4 py-2 text-sm text-gray-900">{assignment.date}</td>
+                                                        <td className="px-4 py-2 text-sm text-gray-900">{assignment.userName}</td>
+                                                        <td className="px-4 py-2 text-sm">
+                                                            <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
+                                                                {assignment.userRole}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-4 py-2 text-sm text-gray-900">{assignment.location}</td>
+                                                        <td className="px-4 py-2 text-sm">
+                                                            <span className={`px-2 py-1 rounded-full text-xs ${
+                                                                assignment.shiftType === 'PAGI' ? 'bg-yellow-100 text-yellow-800' :
+                                                                assignment.shiftType === 'SIANG' ? 'bg-orange-100 text-orange-800' :
+                                                                assignment.shiftType === 'MALAM' ? 'bg-indigo-100 text-indigo-800' :
+                                                                'bg-gray-100 text-gray-800'
+                                                            }`}>
+                                                                {assignment.shiftType}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-4 py-2 text-sm">
+                                                            <span className={`font-medium ${
+                                                                assignment.score >= 80 ? 'text-green-600' :
+                                                                assignment.score >= 60 ? 'text-yellow-600' :
+                                                                'text-red-600'
+                                                            }`}>
+                                                                {assignment.score}/100
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Recommendations */}
+                            {bulkPreviewData.data.recommendations && bulkPreviewData.data.recommendations.length > 0 && (
+                                <div className="mb-6">
+                                    <h3 className="text-lg font-semibold mb-3">Rekomendasi Sistem</h3>
+                                    <div className="bg-blue-50 border-l-4 border-blue-400 p-4">
+                                        <ul className="text-sm text-blue-800 space-y-1">
+                                            {bulkPreviewData.data.recommendations.map((rec: string, index: number) => (
+                                                <li key={index}>• {rec}</li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Action Buttons */}
+                            <div className="flex justify-end gap-3">
+                                <button
+                                    onClick={() => setShowBulkPreview(false)}
+                                    className="px-6 py-3 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors font-medium"
+                                >
+                                    Batal
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        if (bulkPreviewData.type === 'weekly') {
+                                            handleConfirmWeeklySchedule();
+                                        } else {
+                                            // TODO: Add monthly confirmation
+                                            handleCreateMonthlySchedule();
+                                        }
+                                    }}
+                                    disabled={isBulkScheduling}
+                                    className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                >
+                                    {isBulkScheduling ? (
+                                        <>
+                                            <Loader2 className="animate-spin w-4 h-4" />
+                                            Membuat Jadwal...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <CheckCircle className="w-4 h-4" />
+                                            Konfirmasi & Buat Jadwal
+                                        </>
+                                    )}
                                 </button>
                             </div>
                         </div>
