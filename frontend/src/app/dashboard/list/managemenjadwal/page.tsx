@@ -9,7 +9,7 @@ import TableSearch from '@/components/common/TableSearch';
 import Image from 'next/image';
 import FilterButton from '@/components/common/FilterButton';
 import SortButton from '@/components/common/SortButton';
-import { Brain, Calendar, Clock, MapPin, Users, AlertTriangle, CheckCircle, Loader2, Grid, List, Zap, Plus, RefreshCw, Eye, Edit, Trash2, Download, BarChart3, Shield, X } from 'lucide-react';
+import { Brain, Calendar, Clock, MapPin, Users, AlertTriangle, CheckCircle, Loader2, Grid, List, Zap, Plus, RefreshCw, Eye, Edit, Trash2, Download, BarChart3, Shield, X, RotateCcw } from 'lucide-react';
 import WorkloadCounterWidget from '@/components/WorkloadCounterWidget';
 import MonthlyScheduleView from '@/components/MonthlyScheduleView';
 import AutoScheduleModal from '@/components/modals/AutoScheduleModal';
@@ -828,6 +828,9 @@ const ManagemenJadwalPage = () => {
     const [isLoadingWorkload, setIsLoadingWorkload] = useState(false);
     const [isResetting, setIsResetting] = useState(false);
     
+    // 🔥 NEW: UI State for Advanced Options
+    const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
+
     // Debug: Monitor modal state changes
     useEffect(() => {
         console.log('Modal states changed:', {
@@ -1725,7 +1728,6 @@ const ManagemenJadwalPage = () => {
                     totalAssigned: result.statistics?.totalAssigned,
                     recommendations: result.recommendations
                 }
-            });
             });
         } catch (error: any) {
             console.error('Preview error:', error);
@@ -2746,85 +2748,6 @@ const ManagemenJadwalPage = () => {
         }
     };
     
-    // Display loading or error state
-    if (isLoading) {
-        return (
-            <div className='bg-white p-4 rounded-md flex-1 m-4 mt-0 flex justify-center items-center min-h-[300px]'>
-                <div className="flex flex-col items-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
-                    <p className="text-gray-500">Memuat data jadwal...</p>
-                </div>
-            </div>
-        );
-    }
-    
-    if (error) {
-        return (
-            <div className='bg-white p-4 rounded-md flex-1 m-4 mt-0'>
-                <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-                    <div className="flex items-start gap-3">
-                        <AlertTriangle className="w-6 h-6 text-red-600 mt-1 flex-shrink-0" />
-                        <div className="flex-1">
-                            <h3 className="text-lg font-semibold text-red-800 mb-2">Koneksi Backend Bermasalah</h3>
-                            
-                            {error.includes('Backend server tidak dapat diakses') ? (
-                                <div className="space-y-4">
-                                    <p className="text-red-700">
-                                        Backend server tidak dapat diakses. Aplikasi memerlukan backend server untuk mengambil data jadwal shift.
-                                    </p>
-                                    
-                                    <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-4">
-                                        <h4 className="font-medium text-yellow-800 mb-2">🔧 Cara Mengatasi:</h4>
-                                        <ol className="list-decimal list-inside space-y-1 text-sm text-yellow-700">
-                                            <li>Buka terminal baru</li>
-                                            <li>Navigasi ke: <code className="bg-yellow-200 px-1 rounded text-xs">/Users/jo/Downloads/Thesis</code></li>
-                                            <li>Jalankan: <code className="bg-yellow-200 px-1 rounded text-xs">./start-backend.sh</code></li>
-                                            <li>Tunggu server aktif (biasanya 10-30 detik)</li>
-                                            <li>Refresh halaman ini</li>
-                                        </ol>
-                                    </div>
-                                    
-                                    <div className="bg-blue-50 border border-blue-300 rounded-lg p-3">
-                                        <p className="text-sm text-blue-700">
-                                            <strong>💡 Tips:</strong> Backend server perlu dijalankan terpisah dari frontend. 
-                                            Server akan menyediakan API untuk data pegawai, jadwal shift, dan fitur Auto Schedule AI.
-                                        </p>
-                                    </div>
-                                    
-                                    <button 
-                                        onClick={() => {
-                                            setPendingRefresh(true);
-                                            closeNotification();
-                                        }}
-                                        className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium"
-                                    >
-                                        🔄 Coba Lagi
-                                    </button>
-                                </div>
-                            ) : (
-                                <div className="space-y-3">
-                                    <p className="text-red-700">{error}</p>
-                                    <button 
-                                        onClick={() => {
-                                            setPendingRefresh(true);
-                                            closeNotification();
-                                        }}
-                                        className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-                                    >
-                                        🔄 Refresh Halaman
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-    
-    // Remove the early return for empty data - let the table handle empty state
-    // This allows the interface to remain consistent
-    
     // Export functionality for analytics
     const exportToCSV = () => {
         const headers = ['Nama,ID Pegawai,Tanggal,Lokasi,Jam Mulai,Jam Selesai,Tipe Shift'];
@@ -2924,6 +2847,83 @@ const ManagemenJadwalPage = () => {
         printWindow.close();
     };
     
+    // Display loading or error state
+    if (isLoading) {
+        return (
+            <div className='bg-white p-4 rounded-md flex-1 m-4 mt-0 flex justify-center items-center min-h-[300px]'>
+                <div className="flex flex-col items-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
+                    <p className="text-gray-500">Memuat data jadwal...</p>
+                </div>
+            </div>
+        );
+    }
+    
+    if (error) {
+        return (
+            <div className='bg-white p-4 rounded-md flex-1 m-4 mt-0'>
+                <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+                    <div className="flex items-start gap-3">
+                        <AlertTriangle className="w-6 h-6 text-red-600 mt-1 flex-shrink-0" />
+                        <div className="flex-1">
+                            <h3 className="text-lg font-semibold text-red-800 mb-2">Koneksi Backend Bermasalah</h3>
+                            
+                            {error.includes('Backend server tidak dapat diakses') ? (
+                                <div className="space-y-4">
+                                    <p className="text-red-700">
+                                        Backend server tidak dapat diakses. Aplikasi memerlukan backend server untuk mengambil data jadwal shift.
+                                    </p>
+                                    
+                                    <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-4">
+                                        <h4 className="font-medium text-yellow-800 mb-2">🔧 Cara Mengatasi:</h4>
+                                        <ol className="list-decimal list-inside space-y-1 text-sm text-yellow-700">
+                                            <li>Buka terminal baru</li>
+                                            <li>Navigasi ke: <code className="bg-yellow-200 px-1 rounded text-xs">/Users/jo/Downloads/Thesis</code></li>
+                                            <li>Jalankan: <code className="bg-yellow-200 px-1 rounded text-xs">./start-backend.sh</code></li>
+                                            <li>Tunggu server aktif (biasanya 10-30 detik)</li>
+                                            <li>Refresh halaman ini</li>
+                                        </ol>
+                                    </div>
+                                    
+                                    <div className="bg-blue-50 border border-blue-300 rounded-lg p-3">
+                                        <p className="text-sm text-blue-700">
+                                            <strong>💡 Tips:</strong> Backend server perlu dijalankan terpisah dari frontend. 
+                                            Server akan menyediakan API untuk data pegawai, jadwal shift, dan fitur Auto Schedule AI.
+                                        </p>
+                                    </div>
+                                    
+                                    <button 
+                                        onClick={() => {
+                                            setPendingRefresh(true);
+                                            closeNotification();
+                                        }}
+                                        className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium"
+                                    >
+                                        🔄 Coba Lagi
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="space-y-3">
+                                    <p className="text-red-700">{error}</p>
+                                    <button 
+                                        onClick={() => {
+                                            setPendingRefresh(true);
+                                            closeNotification();
+                                        }}
+                                        className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                                    >
+                                        🔄 Refresh Halaman
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+    
+    // Main component return
     return (
         <div>
 
@@ -3073,138 +3073,103 @@ const ManagemenJadwalPage = () => {
                 </div>
             </div>
 
-            {/* ACTION BUTTONS SECTION */}
+            {/* SIMPLIFIED ACTION BUTTONS SECTION */}
             {(userRole === "admin" || userRole === "supervisor") && (
-                <div className="flex flex-wrap items-center gap-4 mb-6">
-                    <button 
-                        className="flex items-center gap-2 px-6 py-3 rounded-lg bg-gradient-to-r from-purple-500 to-blue-600 text-white hover:from-purple-600 hover:to-blue-700 transition-all shadow-md text-sm font-medium"
-                        onClick={() => setIsAutoScheduleModalOpen(true)}
-                        title="Buat jadwal otomatis menggunakan AI Hybrid Algorithm"
-                    >
-                        <Zap className="w-4 h-4" />
-                        Jadwal Otomatis AI
-                    </button>
-                    
-                    <button 
-                        className="flex items-center gap-2 px-6 py-3 rounded-lg bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700 transition-all shadow-md text-sm font-medium"
-                        onClick={() => setIsCreateShiftModalOpen(true)}
-                        title="Buat shift baru secara manual"
-                    >
-                        <Plus className="w-4 h-4" />
-                        Tambah Shift Manual
-                    </button>
-                    
-                    <button 
-                        className="flex items-center gap-2 px-6 py-3 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-600 text-white hover:from-blue-600 hover:to-cyan-700 transition-all shadow-md text-sm font-medium"
-                        onClick={() => setIsBulkScheduleModalOpen(true)}
-                        title="Buat jadwal untuk banyak pegawai sekaligus"
-                    >
-                        <Calendar className="w-4 h-4" />
-                        Bulk Scheduling
-                    </button>
-                    
-                    <button 
-                        className="flex items-center gap-2 px-6 py-3 rounded-lg bg-gradient-to-r from-orange-500 to-red-600 text-white hover:from-orange-600 hover:to-red-700 transition-all shadow-md text-sm font-medium"
-                        onClick={() => {
-                            setSwapShiftEmployeeId(null);
-                            setShowSwapRequests(true);
-                        }}
-                        title="Kelola permintaan tukar shift"
-                    >
-                        <RefreshCw className="w-4 h-4" />
-                        Kelola Swap Request
-                    </button>
-                    
-                    <button 
-                        className="flex items-center gap-2 px-6 py-3 rounded-lg bg-gradient-to-r from-red-600 to-red-700 text-white hover:from-red-700 hover:to-red-800 transition-all shadow-md text-sm font-medium"
-                        onClick={() => setIsDeleteAllModalOpen(true)}
-                        title="Hapus semua data shift - Gunakan dengan hati-hati!"
-                    >
-                        <Trash2 className="w-4 h-4" />
-                        Hapus Semua Shift
-                    </button>
+                <div className="mb-6">
+                    {/* Primary Actions - Main Focus */}
+                    <div className="flex flex-wrap items-center gap-4 mb-4">
+                        <button 
+                            className="flex items-center gap-2 px-8 py-4 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-600 text-white hover:from-blue-600 hover:to-cyan-700 transition-all shadow-lg text-base font-semibold border-2 border-blue-600"
+                            onClick={() => setIsBulkScheduleModalOpen(true)}
+                            title="Buat jadwal untuk banyak pegawai sekaligus - Workflow lengkap dengan preview"
+                        >
+                            <Calendar className="w-5 h-5" />
+                            📅 Bulk Scheduling
+                        </button>
+                        
+                        <button 
+                            className="flex items-center gap-2 px-6 py-3 rounded-lg bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700 transition-all shadow-md text-sm font-medium"
+                            onClick={() => setIsCreateShiftModalOpen(true)}
+                            title="Buat shift baru secara manual"
+                        >
+                            <Plus className="w-4 h-4" />
+                            ➕ Tambah Shift Manual
+                        </button>
+                        
+                        <button 
+                            className="flex items-center gap-2 px-6 py-3 rounded-lg bg-gradient-to-r from-indigo-500 to-purple-600 text-white hover:from-indigo-600 hover:to-purple-700 transition-all shadow-md text-sm font-medium"
+                            onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}
+                            title="Tampilkan opsi lanjutan dan analisis"
+                        >
+                            <BarChart3 className="w-4 h-4" />
+                            📊 Laporan & Analisis
+                        </button>
+                    </div>
 
-                    {/* 🔥 NEW FEATURES BUTTONS */}
-                    <button 
-                        className="flex items-center gap-2 px-6 py-3 rounded-lg bg-gradient-to-r from-indigo-500 to-purple-600 text-white hover:from-indigo-600 hover:to-purple-700 transition-all shadow-md text-sm font-medium"
-                        onClick={handlePreviewOptimalShifts}
-                        disabled={isLoadingPreview}
-                        title="Preview jadwal optimal tanpa menyimpan ke database"
-                    >
-                        {isLoadingPreview ? (
-                            <>
-                                <Loader2 className="animate-spin w-4 h-4" />
-                                Loading...
-                            </>
-                        ) : (
-                            <>
-                                <Eye className="w-4 h-4" />
-                                Preview Optimal
-                            </>
-                        )}
-                    </button>
-
-                    <button 
-                        className="flex items-center gap-2 px-6 py-3 rounded-lg bg-gradient-to-r from-teal-500 to-cyan-600 text-white hover:from-teal-600 hover:to-cyan-700 transition-all shadow-md text-sm font-medium"
-                        onClick={handleAnalyzeWorkload}
-                        disabled={isLoadingWorkload}
-                        title="Analisis beban kerja dan distribusi shift"
-                    >
-                        {isLoadingWorkload ? (
-                            <>
-                                <Loader2 className="animate-spin w-4 h-4" />
-                                Loading...
-                            </>
-                        ) : (
-                            <>
-                                <BarChart3 className="w-4 h-4" />
+                    {/* Secondary Actions - Collapsible */}
+                    {showAdvancedOptions && (
+                        <div className="flex flex-wrap items-center gap-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                            <span className="text-sm text-gray-600 font-medium">Opsi Lanjutan:</span>
+                            
+                            <button 
+                                className="flex items-center gap-2 px-4 py-2 rounded-md bg-white text-gray-700 hover:bg-gray-100 transition-colors text-sm border border-gray-300"
+                                onClick={handleAnalyzeWorkload}
+                                disabled={isLoadingWorkload}
+                                title="Analisis beban kerja"
+                            >
+                                {isLoadingWorkload ? (
+                                    <Loader2 className="animate-spin w-4 h-4" />
+                                ) : (
+                                    <BarChart3 className="w-4 h-4" />
+                                )}
                                 Analisis Beban
-                            </>
-                        )}
-                    </button>
+                            </button>
 
-                    {/* 🔥 NEW: Balance Analyzer Button */}
-                    <button 
-                        className="flex items-center gap-2 px-6 py-3 rounded-lg bg-gradient-to-r from-emerald-500 to-green-600 text-white hover:from-emerald-600 hover:to-green-700 transition-all shadow-md text-sm font-medium"
-                        onClick={() => setIsBalanceAnalyzerOpen(true)}
-                        title="Analisis keseimbangan shift: variasi, rotasi, dan keadilan"
-                    >
-                        <Shield className="w-4 h-4" />
-                        Analisis Keseimbangan
-                    </button>
-                        title="Analisis distribusi beban kerja pegawai"
-                    >
-                        {isLoadingWorkload ? (
-                            <>
-                                <Loader2 className="animate-spin w-4 h-4" />
-                                Analyzing...
-                            </>
-                        ) : (
-                            <>
-                                <BarChart3 className="w-4 h-4" />
-                                Workload Balance
-                            </>
-                        )}
-                    </button>
+                            <button 
+                                className="flex items-center gap-2 px-4 py-2 rounded-md bg-white text-gray-700 hover:bg-gray-100 transition-colors text-sm border border-gray-300"
+                                onClick={() => setIsBalanceAnalyzerOpen(true)}
+                                title="Analisis keseimbangan shift"
+                            >
+                                <Shield className="w-4 h-4" />
+                                Analisis Keseimbangan
+                            </button>
 
-                    <button 
-                        className="flex items-center gap-2 px-6 py-3 rounded-lg bg-gradient-to-r from-rose-500 to-pink-600 text-white hover:from-rose-600 hover:to-pink-700 transition-all shadow-md text-sm font-medium"
-                        onClick={() => setIsResetModalOpen(true)}
-                        disabled={isResetting}
-                        title="Reset/hapus semua shift yang dibuat otomatis"
-                    >
-                        {isResetting ? (
-                            <>
-                                <Loader2 className="animate-spin w-4 h-4" />
-                                Resetting...
-                            </>
-                        ) : (
-                            <>
+                            <button 
+                                className="flex items-center gap-2 px-4 py-2 rounded-md bg-white text-gray-700 hover:bg-gray-100 transition-colors text-sm border border-gray-300"
+                                onClick={() => {
+                                    setSwapShiftEmployeeId(null);
+                                    setShowSwapRequests(true);
+                                }}
+                                title="Kelola permintaan tukar shift"
+                            >
                                 <RefreshCw className="w-4 h-4" />
-                                Reset Auto Shifts
-                            </>
-                        )}
-                    </button>
+                                Swap Request
+                            </button>
+
+                            <button 
+                                className="flex items-center gap-2 px-4 py-2 rounded-md bg-white text-red-600 hover:bg-red-50 transition-colors text-sm border border-red-300"
+                                onClick={() => setIsResetModalOpen(true)}
+                                disabled={isResetting}
+                                title="Reset semua shift otomatis"
+                            >
+                                {isResetting ? (
+                                    <Loader2 className="animate-spin w-4 h-4" />
+                                ) : (
+                                    <RotateCcw className="w-4 h-4" />
+                                )}
+                                Reset Auto
+                            </button>
+
+                            <button 
+                                className="flex items-center gap-2 px-4 py-2 rounded-md bg-white text-red-600 hover:bg-red-50 transition-colors text-sm border border-red-300"
+                                onClick={() => setIsDeleteAllModalOpen(true)}
+                                title="Hapus semua shift - Hati-hati!"
+                            >
+                                <Trash2 className="w-4 h-4" />
+                                Hapus Semua
+                            </button>
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -4493,131 +4458,9 @@ const ManagemenJadwalPage = () => {
                                 </div>
                                 <button
                                     onClick={() => setIsPreviewModalOpen(false)}
-                                    className="text-gray-400 hover:text-gray-600"
-                                >
-                                    <X className="w-6 h-6" />
-                                </button>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                                <div className="bg-blue-50 p-4 rounded-lg">
-                                    <div className="text-2xl font-bold text-blue-600">{previewData.statistics?.totalRequested || 0}</div>
-                                    <div className="text-sm text-gray-600">Total Diminta</div>
-                                </div>
-                                <div className="bg-green-50 p-4 rounded-lg">
-                                    <div className="text-2xl font-bold text-green-600">{previewData.statistics?.totalAssigned || 0}</div>
-                                    <div className="text-sm text-gray-600">Berhasil Diassign</div>
-                                </div>
-                                <div className="bg-purple-50 p-4 rounded-lg">
-                                    <div className="text-2xl font-bold text-purple-600">{previewData.statistics?.fulfillmentRate?.toFixed(1) || 0}%</div>
-                                    <div className="text-sm text-gray-600">Tingkat Pemenuhan</div>
-                                </div>
-                                <div className="bg-orange-50 p-4 rounded-lg">
-                                    <div className="text-2xl font-bold text-orange-600">{previewData.statistics?.conflicts?.length || 0}</div>
-                                    <div className="text-sm text-gray-600">Konflik Terdeteksi</div>
-                                </div>
-                            </div>
-
-                            {previewData.preview && previewData.preview.length > 0 && (
-                                <div className="mb-6">
-                                    <h3 className="text-lg font-semibold mb-3">Assignments to be Created</h3>
-                                    <div className="max-h-60 overflow-y-auto">
-                                        <table className="min-w-full bg-white border border-gray-200">
-                                            <thead className="bg-gray-50">
-                                                <tr>
-                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Employee</th>
-                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
-                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Location</th>
-                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Shift</th>
-                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-gray-200">
-                                                {previewData.preview.map((assignment: any, index: number) => (
-                                                    <tr key={index}>
-                                                        <td className="px-4 py-2 text-sm text-gray-900">{assignment.userName}</td>
-                                                        <td className="px-4 py-2 text-sm text-gray-900">
-                                                            <span className={`px-2 py-1 rounded-full text-xs ${
-                                                                assignment.userRole === 'PERAWAT' ? 'bg-blue-100 text-blue-800' :
-                                                                assignment.userRole === 'DOKTER' ? 'bg-purple-100 text-purple-800' :
-                                                                'bg-gray-100 text-gray-800'
-                                                            }`}>
-                                                                {assignment.userRole}
-                                                            </span>
-                                                        </td>
-                                                        <td className="px-4 py-2 text-sm text-gray-900">{assignment.date}</td>
-                                                        <td className="px-4 py-2 text-sm text-gray-900">{assignment.location}</td>
-                                                        <td className="px-4 py-2 text-sm text-gray-900">
-                                                            <span className={`px-2 py-1 rounded-full text-xs ${
-                                                                assignment.shiftType === 'PAGI' ? 'bg-yellow-100 text-yellow-800' :
-                                                                assignment.shiftType === 'SIANG' ? 'bg-orange-100 text-orange-800' :
-                                                                assignment.shiftType === 'MALAM' ? 'bg-indigo-100 text-indigo-800' :
-                                                                'bg-gray-100 text-gray-800'
-                                                            }`}>
-                                                                {assignment.shiftType}
-                                                            </span>
-                                                        </td>
-                                                        <td className="px-4 py-2 text-sm text-gray-900">{assignment.score?.toFixed(2) || 'N/A'}</td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Recommendations Section */}
-                            {previewData.recommendations && previewData.recommendations.length > 0 && (
-                                <div className="mb-6">
-                                    <h3 className="text-lg font-semibold mb-3">Rekomendasi Sistem</h3>
-                                    <div className="bg-blue-50 p-4 rounded-lg">
-                                        <ul className="list-disc list-inside space-y-1 text-sm text-blue-800">
-                                            {previewData.recommendations.map((rec: string, index: number) => (
-                                                <li key={index}>{rec}</li>
-                                            ))}
-                                        </ul>
-                                    </div>
-                                </div>
-                            )}
-
-                            <div className="flex justify-end gap-3">
-                                <button
-                                    onClick={() => setIsPreviewModalOpen(false)}
-                                    className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
-                                >
-                                    Batal
-                                </button>
-                                {previewData.preview && previewData.preview.length > 0 && (
-                                    <button
-                                        onClick={handleConfirmAndCreateShifts}
-                                        className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
-                                    >
-                                        <CheckCircle className="w-4 h-4" />
-                                        Konfirmasi & Buat Jadwal
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                </div>
             )}
 
-            {/* 🔥 NEW MODAL 2: Workload Analysis */}
-            {isWorkloadModalOpen && workloadData && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
-                        <div className="p-6">
-                            <div className="flex items-center justify-between mb-6">
-                                <div className="flex items-center gap-3">
-                                    <BarChart3 className="w-6 h-6 text-teal-600" />
-                                    <h2 className="text-xl font-semibold">Analisis Beban Kerja</h2>
-                                </div>
-                                <button
-                                    onClick={() => setIsWorkloadModalOpen(false)}
-                                    className="text-gray-400 hover:text-gray-600"
-                                >
-                                    <X className="w-6 h-6" />
+            {/* 🔥 NEW MODAL 2: Workload Analysis */} h-6" />
                                 </button>
                             </div>
 

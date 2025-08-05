@@ -137,4 +137,22 @@ export class ShiftController {
   remove(@Param('id') id: string) {
     return this.shiftService.remove(+id);
   }
+
+  /**
+   * 🔥 NEW: Bulk Scheduling Preview - Generate preview without saving
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('bulk-preview')
+  async generateBulkPreview(@Body() bulkConfig: any) {
+    return this.shiftService.generateBulkSchedulePreview(bulkConfig);
+  }
+
+  /**
+   * 🔥 NEW: Bulk Scheduling - Create multiple shifts at once
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('bulk-create')
+  async createBulkSchedule(@Body() bulkConfig: any) {
+    return this.shiftService.createBulkSchedule(bulkConfig);
+  }
 }

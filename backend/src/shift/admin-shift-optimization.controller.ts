@@ -1,5 +1,18 @@
-import { Controller, Get, Post, Body, Query, UseGuards, Req, Param, Delete } from '@nestjs/common';
-import { AdminShiftOptimizationService, SchedulingResult } from './admin-shift-optimization.service';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Query,
+  UseGuards,
+  Req,
+  Param,
+  Delete,
+} from '@nestjs/common';
+import {
+  AdminShiftOptimizationService,
+  SchedulingResult,
+} from './admin-shift-optimization.service';
 import { AdminMonitoringService } from './admin-monitoring.service';
 import { AdvancedBacktrackingService } from './advanced-backtracking.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -72,7 +85,7 @@ interface WeeklyScheduleRequest {
   shiftPattern?: {
     [location: string]: {
       PAGI?: number;
-      SIANG?: number; 
+      SIANG?: number;
       MALAM?: number;
     };
   };
@@ -90,6 +103,14 @@ interface MonthlyScheduleRequest {
     maxShiftsPerPerson: number;
     maxConsecutiveDays: number;
   };
+}
+
+interface BalanceRecommendation {
+  type: string;
+  severity: string;
+  message: string;
+  affectedUsers: any[];
+  suggestedActions: string[];
 }
 
 @Controller('admin/shift-optimization')
@@ -111,7 +132,9 @@ export class AdminShiftOptimizationController {
    * Get comprehensive admin dashboard
    */
   @Get('dashboard')
-  async getAdminDashboard(@Req() req: UserRequest): Promise<AdminDashboardResponse> {
+  async getAdminDashboard(
+    @Req() req: UserRequest,
+  ): Promise<AdminDashboardResponse> {
     this.checkAdminAccess(req);
     return this.adminOptimizationService.getAdminDashboard();
   }
@@ -127,7 +150,7 @@ export class AdminShiftOptimizationController {
     this.checkAdminAccess(req);
 
     const dashboard = await this.adminOptimizationService.getAdminDashboard();
-    
+
     if (severity) {
       const filteredAlerts = dashboard.workloadAlerts.filter(
         (alert: any) => alert.status === severity,
@@ -137,7 +160,7 @@ export class AdminShiftOptimizationController {
         summary: dashboard.summary,
       };
     }
-    
+
     return {
       alerts: dashboard.workloadAlerts,
       summary: dashboard.summary,
@@ -153,18 +176,24 @@ export class AdminShiftOptimizationController {
     @Body() createShiftsDto: CreateOptimalShiftsDto,
   ): Promise<OptimalShiftsResponse> {
     try {
-      console.log('🔍 Admin Optimization - Received request:', JSON.stringify(createShiftsDto, null, 2));
+      console.log(
+        '🔍 Admin Optimization - Received request:',
+        JSON.stringify(createShiftsDto, null, 2),
+      );
       this.checkAdminAccess(req);
-      
+
       console.log('✅ Admin access verified');
-      
+
       // Generate shift requests based on date range and scheduling type
       const shiftRequests = this.generateShiftRequests(createShiftsDto);
       console.log('📅 Generated shift requests:', shiftRequests.length);
-      
-      const result = await this.adminOptimizationService.createOptimalShiftAssignments(shiftRequests);
+
+      const result =
+        await this.adminOptimizationService.createOptimalShiftAssignments(
+          shiftRequests,
+        );
       console.log('✅ Optimization completed successfully');
-      
+
       return result;
     } catch (error) {
       console.error('❌ Admin Optimization Error:', error);
@@ -192,17 +221,26 @@ export class AdminShiftOptimizationController {
     recommendations: string[];
   }> {
     try {
-      console.log('👁️ Admin Optimization - Preview request:', JSON.stringify(createShiftsDto, null, 2));
+      console.log(
+        '👁️ Admin Optimization - Preview request:',
+        JSON.stringify(createShiftsDto, null, 2),
+      );
       this.checkAdminAccess(req);
-      
+
       // Generate shift requests based on date range and scheduling type
       const shiftRequests = this.generateShiftRequests(createShiftsDto);
-      console.log('📅 Generated shift requests for preview:', shiftRequests.length);
-      
+      console.log(
+        '📅 Generated shift requests for preview:',
+        shiftRequests.length,
+      );
+
       // Get preview WITHOUT saving to database
-      const result = await this.adminOptimizationService.previewOptimalShiftAssignments(shiftRequests);
+      const result =
+        await this.adminOptimizationService.previewOptimalShiftAssignments(
+          shiftRequests,
+        );
       console.log('✅ Preview completed successfully');
-      
+
       return result;
     } catch (error) {
       console.error('❌ Admin Optimization Preview Error:', error);
@@ -226,12 +264,17 @@ export class AdminShiftOptimizationController {
     };
   }> {
     try {
-      console.log('✅ Admin Optimization - Confirming shifts:', confirmDto.assignments.length);
+      console.log(
+        '✅ Admin Optimization - Confirming shifts:',
+        confirmDto.assignments.length,
+      );
       this.checkAdminAccess(req);
-      
-      const result = await this.adminOptimizationService.confirmAndSaveShifts(confirmDto.assignments);
+
+      const result = await this.adminOptimizationService.confirmAndSaveShifts(
+        confirmDto.assignments,
+      );
       console.log('✅ Shifts confirmed and saved successfully');
-      
+
       return result;
     } catch (error) {
       console.error('❌ Admin Optimization Confirm Error:', error);
@@ -239,22 +282,35 @@ export class AdminShiftOptimizationController {
     }
   }
 
-  private generateShiftRequests(dto: CreateOptimalShiftsDto): ShiftRequestDto[] {
+  private generateShiftRequests(
+    dto: CreateOptimalShiftsDto,
+  ): ShiftRequestDto[] {
     const requests: ShiftRequestDto[] = [];
     const startDate = new Date(dto.startDate);
     const endDate = new Date(dto.endDate);
-    
+
     // Define available locations (matching Prisma enum)
-    const locations = ['ICU', 'GAWAT_DARURAT', 'RAWAT_INAP', 'RADIOLOGI', 'LABORATORIUM', 'FARMASI'];
+    const locations = [
+      'ICU',
+      'GAWAT_DARURAT',
+      'RAWAT_INAP',
+      'RADIOLOGI',
+      'LABORATORIUM',
+      'FARMASI',
+    ];
     const shiftTypes = ['PAGI', 'SIANG', 'MALAM'] as const;
-    
+
     // Generate requests for each day in range
-    for (let date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {
+    for (
+      let date = new Date(startDate);
+      date <= endDate;
+      date.setDate(date.getDate() + 1)
+    ) {
       const dateStr = date.toISOString().split('T')[0];
-      
+
       // For each date, create requests for different locations and shifts
-      locations.forEach(location => {
-        shiftTypes.forEach(shiftType => {
+      locations.forEach((location) => {
+        shiftTypes.forEach((shiftType) => {
           requests.push({
             date: dateStr,
             location,
@@ -266,7 +322,7 @@ export class AdminShiftOptimizationController {
         });
       });
     }
-    
+
     return requests;
   }
 
@@ -289,8 +345,11 @@ export class AdminShiftOptimizationController {
       priority: 'NORMAL',
     };
 
-    const result = await this.adminOptimizationService.createOptimalShiftAssignments([request]);
-    
+    const result =
+      await this.adminOptimizationService.createOptimalShiftAssignments([
+        request,
+      ]);
+
     return {
       capacity: result.locationCapacityStatus[0] || null,
       suggestions: result.recommendations || [],
@@ -306,22 +365,34 @@ export class AdminShiftOptimizationController {
 
     const dashboard = await this.adminOptimizationService.getAdminDashboard();
     const overworkedEmployees = dashboard.workloadAlerts.filter(
-      (alert: any) => alert.status === 'OVERWORKED' || alert.status === 'CRITICAL',
+      (alert: any) =>
+        alert.status === 'OVERWORKED' || alert.status === 'CRITICAL',
     );
 
     return {
       totalOverworked: overworkedEmployees.length,
-      criticalCases: overworkedEmployees.filter((e: any) => e.status === 'CRITICAL').length,
+      criticalCases: overworkedEmployees.filter(
+        (e: any) => e.status === 'CRITICAL',
+      ).length,
       employees: overworkedEmployees,
       recommendations: this.generateSimpleRecommendations(overworkedEmployees),
       statistics: {
-        averageShifts: overworkedEmployees.length > 0 
-          ? overworkedEmployees.reduce((sum: number, emp: any) => sum + emp.currentShifts, 0) / overworkedEmployees.length
-          : 0,
-        maxConsecutiveDays: overworkedEmployees.length > 0
-          ? Math.max(...overworkedEmployees.map((emp: any) => emp.consecutiveDays))
-          : 0,
-        affectedDepartments: [...new Set(overworkedEmployees.map((emp: any) => emp.role))],
+        averageShifts:
+          overworkedEmployees.length > 0
+            ? overworkedEmployees.reduce(
+                (sum: number, emp: any) => sum + emp.currentShifts,
+                0,
+              ) / overworkedEmployees.length
+            : 0,
+        maxConsecutiveDays:
+          overworkedEmployees.length > 0
+            ? Math.max(
+                ...overworkedEmployees.map((emp: any) => emp.consecutiveDays),
+              )
+            : 0,
+        affectedDepartments: [
+          ...new Set(overworkedEmployees.map((emp: any) => emp.role)),
+        ],
       },
     };
   }
@@ -337,7 +408,7 @@ export class AdminShiftOptimizationController {
     this.checkAdminAccess(req);
 
     const dashboard = await this.adminOptimizationService.getAdminDashboard();
-    
+
     const suggestions = dashboard.locationCapacity
       .filter((loc: any) => loc.utilization > 90)
       .map((loc: any) => ({
@@ -349,9 +420,10 @@ export class AdminShiftOptimizationController {
     return {
       capacityStatus: dashboard.locationCapacity,
       highUtilization: suggestions,
-      recommendations: suggestions.length > 0 
-        ? ['Consider redistributing staff from high-utilization areas']
-        : ['Capacity levels are within normal ranges'],
+      recommendations:
+        suggestions.length > 0
+          ? ['Consider redistributing staff from high-utilization areas']
+          : ['Capacity levels are within normal ranges'],
     };
   }
 
@@ -364,7 +436,9 @@ export class AdminShiftOptimizationController {
       );
     }
 
-    const criticalCases = overworkedEmployees.filter((e: any) => e.status === 'CRITICAL');
+    const criticalCases = overworkedEmployees.filter(
+      (e: any) => e.status === 'CRITICAL',
+    );
     if (criticalCases.length > 0) {
       recommendations.push(
         `${criticalCases.length} employees need immediate rest periods`,
@@ -377,7 +451,7 @@ export class AdminShiftOptimizationController {
   /**
    * Enhanced monitoring endpoints
    */
-  
+
   // Get enhanced admin dashboard with monitoring features
   @Get('dashboard/enhanced')
   async getEnhancedDashboard(@Req() req: UserRequest) {
@@ -396,7 +470,10 @@ export class AdminShiftOptimizationController {
 
   // Get user shift statistics for monitoring
   @Get('monitoring/users')
-  async getUserStatistics(@Req() req: UserRequest, @Query('userId') userId?: string) {
+  async getUserStatistics(
+    @Req() req: UserRequest,
+    @Query('userId') userId?: string,
+  ) {
     if (req.user.role !== 'admin') {
       throw new Error('Unauthorized: Admin access required');
     }
@@ -426,7 +503,11 @@ export class AdminShiftOptimizationController {
 
   // Update user statistics after shift changes
   @Post('monitoring/users/:userId/update')
-  async updateUserStats(@Param('userId') userId: string, @Body() shiftData: any, @Req() req: UserRequest) {
+  async updateUserStats(
+    @Param('userId') userId: string,
+    @Body() shiftData: any,
+    @Req() req: UserRequest,
+  ) {
     if (req.user.role !== 'admin') {
       throw new Error('Unauthorized: Admin access required');
     }
@@ -447,10 +528,11 @@ export class AdminShiftOptimizationController {
   @Delete('reset-auto-shifts')
   async resetAutoShifts(
     @Req() req: UserRequest,
-    @Body() resetDto: { 
-      startDate: string; 
-      endDate: string; 
-      source?: string; // 'SYSTEM_AUTO_SCHEDULE', 'BULK_WEEKLY', 'BULK_MONTHLY' 
+    @Body()
+    resetDto: {
+      startDate: string;
+      endDate: string;
+      source?: string; // 'SYSTEM_AUTO_SCHEDULE', 'BULK_WEEKLY', 'BULK_MONTHLY'
     },
   ): Promise<{
     success: boolean;
@@ -465,13 +547,14 @@ export class AdminShiftOptimizationController {
     try {
       console.log('🗑️ Admin Reset - Deleting auto-generated shifts:', resetDto);
       this.checkAdminAccess(req);
-      
-      const result = await this.adminOptimizationService.resetAutoGeneratedShifts(
-        resetDto.startDate, 
-        resetDto.endDate, 
-        resetDto.source
-      );
-      
+
+      const result =
+        await this.adminOptimizationService.resetAutoGeneratedShifts(
+          resetDto.startDate,
+          resetDto.endDate,
+          resetDto.source,
+        );
+
       console.log('✅ Auto-generated shifts reset successfully');
       return result;
     } catch (error) {
@@ -486,10 +569,11 @@ export class AdminShiftOptimizationController {
   @Post('preview-reset-auto-shifts')
   async previewResetAutoShifts(
     @Req() req: UserRequest,
-    @Body() resetDto: { 
-      startDate: string; 
-      endDate: string; 
-      source?: string; 
+    @Body()
+    resetDto: {
+      startDate: string;
+      endDate: string;
+      source?: string;
     },
   ): Promise<{
     shiftsToDelete: any[];
@@ -502,15 +586,19 @@ export class AdminShiftOptimizationController {
     };
   }> {
     try {
-      console.log('👁️ Admin Preview Reset - Checking auto-generated shifts:', resetDto);
-      this.checkAdminAccess(req);
-      
-      const result = await this.adminOptimizationService.previewResetAutoGeneratedShifts(
-        resetDto.startDate, 
-        resetDto.endDate, 
-        resetDto.source
+      console.log(
+        '👁️ Admin Preview Reset - Checking auto-generated shifts:',
+        resetDto,
       );
-      
+      this.checkAdminAccess(req);
+
+      const result =
+        await this.adminOptimizationService.previewResetAutoGeneratedShifts(
+          resetDto.startDate,
+          resetDto.endDate,
+          resetDto.source,
+        );
+
       return result;
     } catch (error) {
       console.error('❌ Preview Reset Error:', error);
@@ -520,16 +608,20 @@ export class AdminShiftOptimizationController {
 
   // Generate weekly schedule automatically
   @Post('create-weekly-schedule')
-  async createWeeklySchedule(@Body() request: WeeklyScheduleRequest, @Req() req: UserRequest) {
+  async createWeeklySchedule(
+    @Body() request: WeeklyScheduleRequest,
+    @Req() req: UserRequest,
+  ) {
     this.checkAdminAccess(req);
 
     try {
       console.log('📅 Creating weekly schedule:', request);
-      const result = await this.adminOptimizationService.createWeeklySchedule(request);
+      const result =
+        await this.adminOptimizationService.createWeeklySchedule(request);
       return {
         success: true,
         weeklySchedule: result,
-        message: `Generated ${result.totalShifts} shifts for week starting ${request.startDate}`
+        message: `Generated ${result.totalShifts} shifts for week starting ${request.startDate}`,
       };
     } catch (error) {
       console.error('Weekly schedule creation error:', error);
@@ -537,7 +629,7 @@ export class AdminShiftOptimizationController {
     }
   }
 
-  // Generate monthly schedule automatically  
+  // Generate monthly schedule automatically
   @Post('create-monthly-schedule')
   async createMonthlySchedule(
     @Body() request: MonthlyScheduleRequest,
@@ -570,11 +662,11 @@ export class AdminShiftOptimizationController {
       console.log('📅 Creating monthly schedule:', request);
       const result =
         await this.adminOptimizationService.createMonthlySchedule(request);
-      
+
       // Generate detailed notification with error breakdown
       const notification =
         await this.adminOptimizationService.getSchedulingNotification(result);
-      
+
       return {
         success: result.success,
         monthlySchedule: result,
@@ -589,13 +681,17 @@ export class AdminShiftOptimizationController {
 
   // Get weekly schedule template suggestions
   @Get('weekly-template/:startDate')
-  async getWeeklyTemplate(@Param('startDate') startDate: string, @Req() req: UserRequest) {
+  async getWeeklyTemplate(
+    @Param('startDate') startDate: string,
+    @Req() req: UserRequest,
+  ) {
     if (req.user.role !== 'admin') {
       throw new Error('Unauthorized: Admin access required');
     }
 
     try {
-      const template = await this.adminOptimizationService.generateWeeklyTemplate(startDate);
+      const template =
+        await this.adminOptimizationService.generateWeeklyTemplate(startDate);
       return { success: true, template };
     } catch (error) {
       console.error('Weekly template error:', error);
@@ -605,13 +701,21 @@ export class AdminShiftOptimizationController {
 
   // Get monthly schedule template suggestions
   @Get('monthly-template/:year/:month')
-  async getMonthlyTemplate(@Param('year') year: string, @Param('month') month: string, @Req() req: UserRequest) {
+  async getMonthlyTemplate(
+    @Param('year') year: string,
+    @Param('month') month: string,
+    @Req() req: UserRequest,
+  ) {
     if (req.user.role !== 'admin') {
       throw new Error('Unauthorized: Admin access required');
     }
 
     try {
-      const template = await this.adminOptimizationService.generateMonthlyTemplate(parseInt(year), parseInt(month));
+      const template =
+        await this.adminOptimizationService.generateMonthlyTemplate(
+          parseInt(year),
+          parseInt(month),
+        );
       return { success: true, template };
     } catch (error) {
       console.error('Monthly template error:', error);
@@ -632,27 +736,34 @@ export class AdminShiftOptimizationController {
 
     try {
       console.log('🔍 Analyzing workload distribution...');
-      
+
       const dashboard = await this.adminOptimizationService.getAdminDashboard();
-      
+
       // Get detailed workload analysis
       const workloadAnalysis = {
         totalUsers: dashboard.workloadAlerts.length,
-        overworkedUsers: dashboard.workloadAlerts.filter((alert: any) => 
-          alert.status === 'OVERWORKED' || alert.status === 'CRITICAL'
+        overworkedUsers: dashboard.workloadAlerts.filter(
+          (alert: any) =>
+            alert.status === 'OVERWORKED' || alert.status === 'CRITICAL',
         ),
-        underworkedUsers: dashboard.workloadAlerts.filter((alert: any) => 
-          alert.status === 'NORMAL' && alert.currentShifts < 3
+        underworkedUsers: dashboard.workloadAlerts.filter(
+          (alert: any) => alert.status === 'NORMAL' && alert.currentShifts < 3,
         ),
         averageShiftsPerUser: dashboard.summary.averageUtilization || 0,
         totalShifts: dashboard.summary.activeShifts || 0,
         fairnessScore: this.calculateFairnessScore(dashboard.workloadAlerts),
         alerts: dashboard.workloadAlerts,
         summary: dashboard.summary,
-        recommendations: this.generateWorkloadRecommendations(dashboard.workloadAlerts)
+        recommendations: this.generateWorkloadRecommendations(
+          dashboard.workloadAlerts,
+        ),
       };
 
-      console.log('✅ Workload analysis completed:', workloadAnalysis.totalUsers, 'users analyzed');
+      console.log(
+        '✅ Workload analysis completed:',
+        workloadAnalysis.totalUsers,
+        'users analyzed',
+      );
       return workloadAnalysis;
     } catch (error) {
       console.error('❌ Workload analysis error:', error);
@@ -665,14 +776,17 @@ export class AdminShiftOptimizationController {
    */
   private calculateFairnessScore(alerts: any[]): number {
     if (alerts.length === 0) return 100;
-    
-    const shifts = alerts.map(alert => alert.currentShifts || 0);
-    const average = shifts.reduce((sum, shift) => sum + shift, 0) / shifts.length;
-    const variance = shifts.reduce((sum, shift) => sum + Math.pow(shift - average, 2), 0) / shifts.length;
+
+    const shifts = alerts.map((alert) => alert.currentShifts || 0);
+    const average =
+      shifts.reduce((sum, shift) => sum + shift, 0) / shifts.length;
+    const variance =
+      shifts.reduce((sum, shift) => sum + Math.pow(shift - average, 2), 0) /
+      shifts.length;
     const standardDeviation = Math.sqrt(variance);
-    
+
     // Lower standard deviation = higher fairness score
-    const fairnessScore = Math.max(0, 100 - (standardDeviation * 10));
+    const fairnessScore = Math.max(0, 100 - standardDeviation * 10);
     return Math.round(fairnessScore);
   }
 
@@ -681,33 +795,41 @@ export class AdminShiftOptimizationController {
    */
   private generateWorkloadRecommendations(alerts: any[]): string[] {
     const recommendations: string[] = [];
-    
-    const overworked = alerts.filter(alert => 
-      alert.status === 'OVERWORKED' || alert.status === 'CRITICAL'
+
+    const overworked = alerts.filter(
+      (alert) => alert.status === 'OVERWORKED' || alert.status === 'CRITICAL',
     ).length;
-    
-    const underworked = alerts.filter(alert => 
-      alert.status === 'NORMAL' && alert.currentShifts < 3
+
+    const underworked = alerts.filter(
+      (alert) => alert.status === 'NORMAL' && alert.currentShifts < 3,
     ).length;
-    
+
     if (overworked > 0) {
-      recommendations.push(`${overworked} pegawai mengalami beban kerja berlebih`);
+      recommendations.push(
+        `${overworked} pegawai mengalami beban kerja berlebih`,
+      );
       recommendations.push('Redistribusi shift untuk mengurangi beban kerja');
     }
-    
+
     if (underworked > 0) {
-      recommendations.push(`${underworked} pegawai memiliki beban kerja rendah`);
-      recommendations.push('Pertimbangkan menambah shift untuk pegawai yang underutilized');
+      recommendations.push(
+        `${underworked} pegawai memiliki beban kerja rendah`,
+      );
+      recommendations.push(
+        'Pertimbangkan menambah shift untuk pegawai yang underutilized',
+      );
     }
-    
+
     if (overworked > 0 && underworked > 0) {
-      recommendations.push('Transfer shift dari pegawai overworked ke underworked');
+      recommendations.push(
+        'Transfer shift dari pegawai overworked ke underworked',
+      );
     }
-    
+
     if (recommendations.length === 0) {
       recommendations.push('Distribusi beban kerja sudah cukup seimbang');
     }
-    
+
     return recommendations;
   }
 
@@ -716,18 +838,23 @@ export class AdminShiftOptimizationController {
    */
   @Post('analyze-balance')
   async analyzeShiftBalance(
-    @Body() body: { timeframe: 'week' | 'month' | 'quarter'; roleFilter?: string; analysisType: string },
+    @Body()
+    body: {
+      timeframe: 'week' | 'month' | 'quarter';
+      roleFilter?: string;
+      analysisType: string;
+    },
     @Req() req: UserRequest,
   ) {
     this.checkAdminAccess(req);
 
     const { timeframe, roleFilter, analysisType } = body;
-    
+
     try {
       // Calculate date range based on timeframe
       const endDate = new Date();
       const startDate = new Date();
-      
+
       switch (timeframe) {
         case 'week':
           startDate.setDate(endDate.getDate() - 7);
@@ -741,31 +868,43 @@ export class AdminShiftOptimizationController {
       }
 
       // Get shifts and users data for analysis
-      const shifts = await this.adminOptimizationService.getShiftsInDateRange(startDate, endDate);
-      const users = await this.adminOptimizationService.getAvailableUsersWithWorkload();
-      
+      const shifts = await this.adminOptimizationService.getShiftsInDateRange(
+        startDate,
+        endDate,
+      );
+      const users =
+        await this.adminOptimizationService.getAvailableUsersWithWorkload();
+
       // Filter users by role if specified
-      const filteredUsers = roleFilter && roleFilter !== 'ALL' 
-        ? users.filter(user => user.role === roleFilter)
-        : users;
+      const filteredUsers =
+        roleFilter && roleFilter !== 'ALL'
+          ? users.filter((user) => user.role === roleFilter)
+          : users;
 
       // Analyze balance for each user
       const userBalanceReport = await Promise.all(
-        filteredUsers.map(async user => {
-          const userShifts = shifts.filter(shift => shift.userId === user.id);
-          
+        filteredUsers.map(async (user) => {
+          const userShifts = shifts.filter((shift) => shift.userId === user.id);
+
           // Calculate shift variety
           const shiftVariety = this.calculateShiftVariety(userShifts);
-          
+
           // Calculate location rotation
           const locationRotation = this.calculateLocationRotation(userShifts);
-          
+
           // Calculate consecutive days and burnout risk
           const consecutiveDays = this.calculateConsecutiveDays(userShifts);
-          const burnoutRisk = this.assessBurnoutRisk(userShifts, consecutiveDays);
-          
+          const burnoutRisk = this.assessBurnoutRisk(
+            userShifts,
+            consecutiveDays,
+          );
+
           // Calculate fairness score
-          const fairnessScore = this.calculateUserFairnessScore(user, userShifts, shifts);
+          const fairnessScore = this.calculateUserFairnessScore(
+            user,
+            userShifts,
+            shifts,
+          );
 
           return {
             userId: user.id,
@@ -775,23 +914,26 @@ export class AdminShiftOptimizationController {
             locationRotation,
             consecutiveDays,
             burnoutRisk,
-            fairnessScore
+            fairnessScore,
           };
-        })
+        }),
       );
 
       // Calculate system-wide metrics
-      const systemWideMetrics = this.calculateSystemWideMetrics(userBalanceReport);
-      
+      const systemWideMetrics =
+        this.calculateSystemWideMetrics(userBalanceReport);
+
       // Generate recommendations
-      const recommendations = this.generateBalanceRecommendations(userBalanceReport, systemWideMetrics);
+      const recommendations = this.generateBalanceRecommendations(
+        userBalanceReport,
+        systemWideMetrics,
+      );
 
       return {
         userBalanceReport,
         systemWideMetrics,
-        recommendations
+        recommendations,
       };
-
     } catch (error) {
       console.error('Error analyzing shift balance:', error);
       throw new Error('Gagal menganalisis keseimbangan shift');
@@ -803,34 +945,40 @@ export class AdminShiftOptimizationController {
    */
   private calculateShiftVariety(userShifts: any[]) {
     const shiftCounts = {
-      PAGI: userShifts.filter(s => s.tipeShift === 'PAGI').length,
-      SIANG: userShifts.filter(s => s.tipeShift === 'SIANG').length,
-      MALAM: userShifts.filter(s => s.tipeShift === 'MALAM').length
+      PAGI: userShifts.filter((s) => s.tipeShift === 'PAGI').length,
+      SIANG: userShifts.filter((s) => s.tipeShift === 'SIANG').length,
+      MALAM: userShifts.filter((s) => s.tipeShift === 'MALAM').length,
     };
-    
+
     const totalShifts = userShifts.length;
     if (totalShifts === 0) {
       return { ...shiftCounts, varietyScore: 100 };
     }
-    
+
     // Calculate variety score based on distribution evenness
-    const shiftTypes = Object.values(shiftCounts).filter(count => count > 0).length;
+    const shiftTypes = Object.values(shiftCounts).filter(
+      (count) => count > 0,
+    ).length;
     const maxPossibleTypes = 3;
     const typeVariety = (shiftTypes / maxPossibleTypes) * 100;
-    
+
     // Calculate distribution evenness
     const idealDistribution = totalShifts / 3;
-    const deviations = Object.values(shiftCounts).map(count => 
-      Math.abs(count - idealDistribution)
+    const deviations = Object.values(shiftCounts).map((count) =>
+      Math.abs(count - idealDistribution),
     );
-    const averageDeviation = deviations.reduce((sum, dev) => sum + dev, 0) / deviations.length;
-    const distributionScore = Math.max(0, 100 - (averageDeviation / idealDistribution) * 50);
-    
+    const averageDeviation =
+      deviations.reduce((sum, dev) => sum + dev, 0) / deviations.length;
+    const distributionScore = Math.max(
+      0,
+      100 - (averageDeviation / idealDistribution) * 50,
+    );
+
     const varietyScore = (typeVariety + distributionScore) / 2;
-    
+
     return {
       ...shiftCounts,
-      varietyScore: Math.round(varietyScore)
+      varietyScore: Math.round(varietyScore),
     };
   }
 
@@ -838,30 +986,34 @@ export class AdminShiftOptimizationController {
    * Calculate location rotation for a user
    */
   private calculateLocationRotation(userShifts: any[]) {
-    const uniqueLocations = [...new Set(userShifts.map(shift => shift.lokasiShift))];
+    const uniqueLocations = [
+      ...new Set(userShifts.map((shift) => shift.lokasiShift)),
+    ];
     const totalShifts = userShifts.length;
-    
+
     if (totalShifts === 0) {
       return { locations: [], rotationScore: 100 };
     }
-    
+
     // Base score on number of different locations
     const locationVariety = uniqueLocations.length;
     const maxExpectedLocations = Math.min(5, totalShifts); // Don't expect more than 5 different locations
     const varietyScore = (locationVariety / maxExpectedLocations) * 100;
-    
+
     // Penalty for too much concentration in one location
-    const locationCounts = uniqueLocations.map(location => 
-      userShifts.filter(shift => shift.lokasiShift === location).length
+    const locationCounts = uniqueLocations.map(
+      (location) =>
+        userShifts.filter((shift) => shift.lokasiShift === location).length,
     );
     const maxConcentration = Math.max(...locationCounts);
-    const concentrationPenalty = totalShifts > 5 ? (maxConcentration / totalShifts) * 50 : 0;
-    
+    const concentrationPenalty =
+      totalShifts > 5 ? (maxConcentration / totalShifts) * 50 : 0;
+
     const rotationScore = Math.max(0, varietyScore - concentrationPenalty);
-    
+
     return {
       locations: uniqueLocations,
-      rotationScore: Math.round(rotationScore)
+      rotationScore: Math.round(rotationScore),
     };
   }
 
@@ -870,23 +1022,24 @@ export class AdminShiftOptimizationController {
    */
   private calculateConsecutiveDays(userShifts: any[]): number {
     if (userShifts.length === 0) return 0;
-    
+
     // Sort shifts by date
     const sortedShifts = userShifts
-      .map(shift => ({
+      .map((shift) => ({
         ...shift,
-        date: new Date(shift.tanggal)
+        date: new Date(shift.tanggal),
       }))
       .sort((a, b) => a.date.getTime() - b.date.getTime());
-    
+
     let maxConsecutive = 1;
     let currentConsecutive = 1;
-    
+
     for (let i = 1; i < sortedShifts.length; i++) {
       const prevDate = sortedShifts[i - 1].date;
       const currentDate = sortedShifts[i].date;
-      const dayDiff = (currentDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24);
-      
+      const dayDiff =
+        (currentDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24);
+
       if (dayDiff === 1) {
         currentConsecutive++;
         maxConsecutive = Math.max(maxConsecutive, currentConsecutive);
@@ -894,44 +1047,57 @@ export class AdminShiftOptimizationController {
         currentConsecutive = 1;
       }
     }
-    
+
     return maxConsecutive;
   }
 
   /**
    * Assess burnout risk based on shift patterns
    */
-  private assessBurnoutRisk(userShifts: any[], consecutiveDays: number): 'LOW' | 'MEDIUM' | 'HIGH' {
+  private assessBurnoutRisk(
+    userShifts: any[],
+    consecutiveDays: number,
+  ): 'LOW' | 'MEDIUM' | 'HIGH' {
     const totalShifts = userShifts.length;
-    const nightShifts = userShifts.filter(s => s.tipeShift === 'MALAM').length;
+    const nightShifts = userShifts.filter(
+      (s) => s.tipeShift === 'MALAM',
+    ).length;
     const nightShiftRatio = totalShifts > 0 ? nightShifts / totalShifts : 0;
-    
+
     // High risk conditions
     if (consecutiveDays > 6 || nightShiftRatio > 0.6 || totalShifts > 25) {
       return 'HIGH';
     }
-    
+
     // Medium risk conditions
     if (consecutiveDays > 4 || nightShiftRatio > 0.4 || totalShifts > 20) {
       return 'MEDIUM';
     }
-    
+
     return 'LOW';
   }
 
   /**
    * Calculate fairness score for individual user
    */
-  private calculateUserFairnessScore(user: any, userShifts: any[], allShifts: any[]): number {
+  private calculateUserFairnessScore(
+    user: any,
+    userShifts: any[],
+    allShifts: any[],
+  ): number {
     const userShiftCount = userShifts.length;
-    const averageShiftCount = allShifts.length / (new Set(allShifts.map(s => s.userId)).size || 1);
-    
+    const averageShiftCount =
+      allShifts.length / (new Set(allShifts.map((s) => s.userId)).size || 1);
+
     // Base fairness on how close user's shift count is to average
     const deviation = Math.abs(userShiftCount - averageShiftCount);
     const maxAcceptableDeviation = averageShiftCount * 0.3; // 30% deviation is acceptable
-    
-    const fairnessScore = Math.max(0, 100 - (deviation / maxAcceptableDeviation) * 100);
-    
+
+    const fairnessScore = Math.max(
+      0,
+      100 - (deviation / maxAcceptableDeviation) * 100,
+    );
+
     return Math.round(fairnessScore);
   }
 
@@ -939,108 +1105,141 @@ export class AdminShiftOptimizationController {
    * Calculate system-wide balance metrics
    */
   private calculateSystemWideMetrics(userBalanceReport: any[]) {
-    const varietyScores = userBalanceReport.map(user => user.shiftVariety.varietyScore);
-    const rotationScores = userBalanceReport.map(user => user.locationRotation.rotationScore);
-    const fairnessScores = userBalanceReport.map(user => user.fairnessScore);
-    
+    const varietyScores = userBalanceReport.map(
+      (user) => user.shiftVariety.varietyScore,
+    );
+    const rotationScores = userBalanceReport.map(
+      (user) => user.locationRotation.rotationScore,
+    );
+    const fairnessScores = userBalanceReport.map((user) => user.fairnessScore);
+
     const averageVarietyScore = Math.round(
-      varietyScores.reduce((sum, score) => sum + score, 0) / varietyScores.length || 0
+      varietyScores.reduce((sum, score) => sum + score, 0) /
+        varietyScores.length || 0,
     );
-    
+
     const averageRotationScore = Math.round(
-      rotationScores.reduce((sum, score) => sum + score, 0) / rotationScores.length || 0
+      rotationScores.reduce((sum, score) => sum + score, 0) /
+        rotationScores.length || 0,
     );
-    
+
     const averageFairnessScore = Math.round(
-      fairnessScores.reduce((sum, score) => sum + score, 0) / fairnessScores.length || 0
+      fairnessScores.reduce((sum, score) => sum + score, 0) /
+        fairnessScores.length || 0,
     );
-    
-    const highBurnoutUsers = userBalanceReport.filter(user => user.burnoutRisk === 'HIGH').length;
-    
+
+    const highBurnoutUsers = userBalanceReport.filter(
+      (user) => user.burnoutRisk === 'HIGH',
+    ).length;
+
     const imbalancedDistribution = userBalanceReport
-      .filter(user => user.shiftVariety.varietyScore < 50 || user.locationRotation.rotationScore < 50)
-      .map(user => user.userName);
+      .filter(
+        (user) =>
+          user.shiftVariety.varietyScore < 50 ||
+          user.locationRotation.rotationScore < 50,
+      )
+      .map((user) => user.userName);
 
     return {
       averageVarietyScore,
       averageRotationScore,
       averageFairnessScore,
       highBurnoutUsers,
-      imbalancedDistribution
+      imbalancedDistribution,
     };
   }
 
   /**
    * Generate balance improvement recommendations
    */
-  private generateBalanceRecommendations(userBalanceReport: any[], systemWideMetrics: any) {
-    const recommendations = [];
-    
+  private generateBalanceRecommendations(
+    userBalanceReport: any[],
+    systemWideMetrics: any,
+  ): BalanceRecommendation[] {
+    const recommendations: BalanceRecommendation[] = [];
+
     // Variety recommendations
-    const lowVarietyUsers = userBalanceReport.filter(user => user.shiftVariety.varietyScore < 60);
+    const lowVarietyUsers = userBalanceReport.filter(
+      (user) => user.shiftVariety.varietyScore < 60,
+    );
     if (lowVarietyUsers.length > 0) {
       recommendations.push({
         type: 'VARIETY',
-        severity: lowVarietyUsers.length > userBalanceReport.length * 0.3 ? 'HIGH' : 'MEDIUM',
+        severity:
+          lowVarietyUsers.length > userBalanceReport.length * 0.3
+            ? 'HIGH'
+            : 'MEDIUM',
         message: `${lowVarietyUsers.length} pegawai memiliki variasi shift yang rendah`,
-        affectedUsers: lowVarietyUsers.map(user => user.userId),
+        affectedUsers: lowVarietyUsers.map((user) => user.userId),
         suggestedActions: [
           'Rotasi antara shift pagi, siang, dan malam',
           'Hindari memberikan tipe shift yang sama berturut-turut',
-          'Implementasikan sistem rotasi shift otomatis'
-        ]
+          'Implementasikan sistem rotasi shift otomatis',
+        ],
       });
     }
-    
+
     // Rotation recommendations
-    const lowRotationUsers = userBalanceReport.filter(user => user.locationRotation.rotationScore < 60);
+    const lowRotationUsers = userBalanceReport.filter(
+      (user) => user.locationRotation.rotationScore < 60,
+    );
     if (lowRotationUsers.length > 0) {
       recommendations.push({
         type: 'ROTATION',
-        severity: lowRotationUsers.length > userBalanceReport.length * 0.3 ? 'HIGH' : 'MEDIUM',
+        severity:
+          lowRotationUsers.length > userBalanceReport.length * 0.3
+            ? 'HIGH'
+            : 'MEDIUM',
         message: `${lowRotationUsers.length} pegawai terlalu lama di lokasi yang sama`,
-        affectedUsers: lowRotationUsers.map(user => user.userId),
+        affectedUsers: lowRotationUsers.map((user) => user.userId),
         suggestedActions: [
           'Rotasi pegawai antar lokasi secara berkala',
           'Buat pola rotasi mingguan atau bulanan',
-          'Berikan kesempatan untuk bertugas di unit berbeda'
-        ]
+          'Berikan kesempatan untuk bertugas di unit berbeda',
+        ],
       });
     }
-    
+
     // Burnout recommendations
-    const highBurnoutUsers = userBalanceReport.filter(user => user.burnoutRisk === 'HIGH');
+    const highBurnoutUsers = userBalanceReport.filter(
+      (user) => user.burnoutRisk === 'HIGH',
+    );
     if (highBurnoutUsers.length > 0) {
       recommendations.push({
         type: 'BURNOUT',
         severity: 'HIGH',
         message: `${highBurnoutUsers.length} pegawai berisiko tinggi mengalami burnout`,
-        affectedUsers: highBurnoutUsers.map(user => user.userId),
+        affectedUsers: highBurnoutUsers.map((user) => user.userId),
         suggestedActions: [
           'Berikan hari libur yang cukup',
           'Kurangi shift malam berturut-turut',
           'Implementasikan batas maksimal hari kerja berturut-turut',
-          'Pantau kesehatan mental pegawai'
-        ]
+          'Pantau kesehatan mental pegawai',
+        ],
       });
     }
-    
+
     // Fairness recommendations
-    const unfairUsers = userBalanceReport.filter(user => user.fairnessScore < 60);
+    const unfairUsers = userBalanceReport.filter(
+      (user) => user.fairnessScore < 60,
+    );
     if (unfairUsers.length > 0) {
       recommendations.push({
         type: 'FAIRNESS',
-        severity: unfairUsers.length > userBalanceReport.length * 0.4 ? 'HIGH' : 'MEDIUM',
+        severity:
+          unfairUsers.length > userBalanceReport.length * 0.4
+            ? 'HIGH'
+            : 'MEDIUM',
         message: `Distribusi shift tidak adil untuk ${unfairUsers.length} pegawai`,
-        affectedUsers: unfairUsers.map(user => user.userId),
+        affectedUsers: unfairUsers.map((user) => user.userId),
         suggestedActions: [
           'Seimbangkan jumlah shift antar pegawai',
           'Gunakan sistem poin untuk shift yang tidak diinginkan',
-          'Implementasikan rotasi yang adil untuk semua pegawai'
-        ]
+          'Implementasikan rotasi yang adil untuk semua pegawai',
+        ],
       });
     }
-    
+
     return recommendations;
   }
 
@@ -1049,20 +1248,25 @@ export class AdminShiftOptimizationController {
    */
   @Post('advanced-backtracking-analysis')
   async performAdvancedBacktrackingAnalysis(
-    @Body() request: { assignments: any[], users: any[] }
-  ) {
+    @Body() request: { assignments: any[]; users: any[] },
+  ): Promise<{
+    success: boolean;
+    optimizedAssignments: any;
+    message: string;
+  }> {
     try {
       console.log('🧠 Starting Advanced Backtracking Analysis...');
-      
-      const result = await this.advancedBacktrackingService.performBacktrackingOptimization(
-        request.assignments,
-        request.users
-      );
+
+      const result =
+        await this.advancedBacktrackingService.performBacktrackingOptimization(
+          request.assignments,
+          request.users,
+        );
 
       return {
         success: true,
         optimizedAssignments: result,
-        message: 'Advanced backtracking analysis completed successfully'
+        message: 'Advanced backtracking analysis completed successfully',
       };
     } catch (error) {
       console.error('Error in advanced backtracking analysis:', error);
@@ -1075,21 +1279,28 @@ export class AdminShiftOptimizationController {
    */
   @Post('advanced-conflict-resolution')
   async performAdvancedConflictResolution(
-    @Body() request: { assignments: any[] }
-  ) {
+    @Body() request: { assignments: any[] },
+  ): Promise<{
+    success: boolean;
+    resolvedAssignments: any;
+    conflictAnalysis: any;
+    resolutionStrategies: any;
+    message: string;
+  }> {
     try {
       console.log('🔬 Starting Advanced Conflict Resolution...');
-      
-      const result = await this.advancedBacktrackingService.performAdvancedConflictResolution(
-        request.assignments
-      );
+
+      const result =
+        await this.advancedBacktrackingService.performAdvancedConflictResolution(
+          request.assignments,
+        );
 
       return {
         success: true,
         resolvedAssignments: result.resolvedAssignments,
         conflictAnalysis: result.conflictAnalysis,
         resolutionStrategies: result.resolutionStrategies,
-        message: 'Advanced conflict resolution completed successfully'
+        message: 'Advanced conflict resolution completed successfully',
       };
     } catch (error) {
       console.error('Error in advanced conflict resolution:', error);
@@ -1102,19 +1313,24 @@ export class AdminShiftOptimizationController {
    */
   @Post('quality-improvement-analysis')
   async performQualityImprovementAnalysis(
-    @Body() request: { assignments: any[] }
-  ) {
+    @Body() request: { assignments: any[] },
+  ): Promise<{
+    success: boolean;
+    qualityReport: any;
+    message: string;
+  }> {
     try {
       console.log('📊 Starting Quality Improvement Analysis...');
-      
-      const result = await this.advancedBacktrackingService.performQualityImprovement(
-        request.assignments
-      );
+
+      const result =
+        await this.advancedBacktrackingService.performQualityImprovement(
+          request.assignments,
+        );
 
       return {
         success: true,
         qualityReport: result,
-        message: 'Quality improvement analysis completed successfully'
+        message: 'Quality improvement analysis completed successfully',
       };
     } catch (error) {
       console.error('Error in quality improvement analysis:', error);

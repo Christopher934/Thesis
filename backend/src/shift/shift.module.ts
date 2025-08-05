@@ -11,6 +11,7 @@ import { SmartSwapService } from './smart-swap.service';
 import { AdminShiftOptimizationController } from './admin-shift-optimization.controller';
 import { AdminShiftOptimizationService } from './admin-shift-optimization.service';
 import { AdminMonitoringService } from './admin-monitoring.service';
+import { AdvancedBacktrackingService } from './advanced-backtracking.service';
 import { ShiftRestrictionsController } from './shift-restrictions.controller';
 import { ShiftSchedulingRestrictionsService } from '../services/shift-scheduling-restrictions.service';
 import { JwtModule } from '@nestjs/jwt';
@@ -38,6 +39,7 @@ import { JwtModule } from '@nestjs/jwt';
     SmartSwapService,
     AdminShiftOptimizationService,
     AdminMonitoringService,
+    AdvancedBacktrackingService,
     ShiftSchedulingRestrictionsService,
     ShiftValidationService,
   ],
